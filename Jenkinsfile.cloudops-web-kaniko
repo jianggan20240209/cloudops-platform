@@ -11,6 +11,19 @@ spec:
     - name: kaniko
       image: harbor-server.jianggan.cn/kaniko/executor:v1.24.0-debug
       imagePullPolicy: IfNotPresent
+      env:
+        - name: HTTP_PROXY
+          value: "http://192.168.1.50:7890"
+        - name: HTTPS_PROXY
+          value: "http://192.168.1.50:7890"
+        - name: http_proxy
+          value: "http://192.168.1.50:7890"
+        - name: https_proxy
+          value: "http://192.168.1.50:7890"
+        - name: NO_PROXY
+          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn"
+        - name: no_proxy
+          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn"
       command:
         - sleep
       args:
@@ -30,15 +43,36 @@ spec:
     }
 
     options {
+        timestamps()
         disableConcurrentBuilds()
     }
 
     environment {
         IMAGE = "harbor-server.jianggan.cn/cloudops/cloudops-web"
         IMAGE_TAG = "main-${BUILD_NUMBER}"
+        HTTP_PROXY = "http://192.168.1.50:7890"
+        HTTPS_PROXY = "http://192.168.1.50:7890"
+        http_proxy = "http://192.168.1.50:7890"
+        https_proxy = "http://192.168.1.50:7890"
+        NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn"
+        no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn"
     }
 
     stages {
+        stage('Prepare Git') {
+            steps {
+                sh '''
+                  git --version
+                  git config --global http.version HTTP/1.1
+                  git config --global http.proxy "${HTTP_PROXY}"
+                  git config --global https.proxy "${HTTPS_PROXY}"
+                  git config --global http.lowSpeedLimit 0
+                  git config --global http.lowSpeedTime 999999
+                  git config --global --list
+                '''
+            }
+        }
+
         stage('Checkout') {
             steps {
                 git branch: 'main',
