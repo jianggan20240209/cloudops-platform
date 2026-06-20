@@ -1,0 +1,75 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  imagePullSecrets:
+    - name: harbor-pull-secret
+  containers:
+    - name: kaniko
+      image: harbor-server.jianggan.cn/kaniko/executor:v1.24.0-debug
+      imagePullPolicy: IfNotPresent
+      command:
+        - sleep
+      args:
+        - "999999"
+      volumeMounts:
+        - name: docker-config
+          mountPath: /kaniko/.docker
+  volumes:
+    - name: docker-config
+      secret:
+        secretName: harbor-pull-secret
+        items:
+          - key: .dockerconfigjson
+            path: config.json
+'''
+        }
+    }
+
+    options {
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        IMAGE = "harbor-server.jianggan.cn/cloudops/cloudops-web"
+        IMAGE_TAG = "main-${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    credentialsId: 'github-user',
+                    url: 'https://github.com/jianggan20240209/cloudops-platform.git'
+            }
+        }
+
+        stage('Show Build Context') {
+            steps {
+                sh '''
+                  echo "===== WORKSPACE ====="
+                  pwd
+                  echo "===== cloudops-web ====="
+                  find services/cloudops-web -maxdepth 2 -type f | sort
+                '''
+            }
+        }
+
+        stage('Build And Push Image') {
+            steps {
+                container('kaniko') {
+                    sh '''
+                      /kaniko/executor \
+                        --context "${WORKSPACE}/services/cloudops-web" \
+                        --dockerfile "${WORKSPACE}/services/cloudops-web/Dockerfile" \
+                        --destination "${IMAGE}:${IMAGE_TAG}" \
+                        --destination "${IMAGE}:latest"
+                    '''
+                }
+            }
+        }
+    }
+}
