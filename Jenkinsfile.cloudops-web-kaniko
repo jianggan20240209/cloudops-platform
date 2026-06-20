@@ -31,6 +31,9 @@ spec:
       volumeMounts:
         - name: docker-config
           mountPath: /kaniko/.docker
+        - name: jianggan-root-ca
+          mountPath: /kaniko/certs
+          readOnly: true
   volumes:
     - name: docker-config
       secret:
@@ -38,6 +41,9 @@ spec:
         items:
           - key: .dockerconfigjson
             path: config.json
+    - name: jianggan-root-ca
+      secret:
+        secretName: jianggan-root-ca
 '''
         }
     }
@@ -64,8 +70,8 @@ spec:
                 sh '''
                   git --version
                   git config --global http.version HTTP/1.1
-                  git config --global http.proxy "${HTTP_PROXY}"
-                  git config --global https.proxy "${HTTPS_PROXY}"
+                  git config --global http.proxy "http://192.168.1.50:7890"
+                  git config --global https.proxy "http://192.168.1.50:7890"
                   git config --global http.lowSpeedLimit 0
                   git config --global http.lowSpeedTime 999999
                   git config --global --list
@@ -100,7 +106,8 @@ spec:
                         --context "${WORKSPACE}/services/cloudops-web" \
                         --dockerfile "${WORKSPACE}/services/cloudops-web/Dockerfile" \
                         --destination "${IMAGE}:${IMAGE_TAG}" \
-                        --destination "${IMAGE}:latest"
+                        --destination "${IMAGE}:latest" \
+                        --registry-certificate harbor-server.jianggan.cn=/kaniko/certs/jianggan-root-ca.crt
                     '''
                 }
             }
