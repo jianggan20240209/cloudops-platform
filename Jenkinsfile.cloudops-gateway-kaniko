@@ -95,6 +95,13 @@ spec:
                   pwd
                   echo "===== cloudops-gateway ====="
                   find services/cloudops-gateway -maxdepth 2 -type f | sort
+                  GIT_COMMIT_SHORT="$(git rev-parse --short=12 HEAD)"
+                  BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  cat > "${WORKSPACE}/gateway-build.env" <<EOF
+GIT_COMMIT_SHORT=${GIT_COMMIT_SHORT}
+BUILD_TIME=${BUILD_TIME}
+EOF
+                  cat "${WORKSPACE}/gateway-build.env"
                 '''
             }
         }
@@ -103,8 +110,7 @@ spec:
             steps {
                 container('kaniko') {
                     sh '''
-                      GIT_COMMIT_SHORT="$(git rev-parse --short=12 HEAD)"
-                      BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                      . "${WORKSPACE}/gateway-build.env"
                       echo "GIT_COMMIT_SHORT=${GIT_COMMIT_SHORT}"
                       echo "BUILD_TIME=${BUILD_TIME}"
 
