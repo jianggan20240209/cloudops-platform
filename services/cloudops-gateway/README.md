@@ -27,6 +27,8 @@ services/cloudops-gateway
 |---|---|
 | `/healthz` | 存活检查 |
 | `/readyz` | 就绪检查 |
+| `/api/healthz` | Ingress `/api` 前缀下的存活检查 |
+| `/api/readyz` | Ingress `/api` 前缀下的就绪检查 |
 | `/api/v1/version` | 服务版本信息 |
 | `/metrics` | Prometheus 指标 |
 
@@ -53,6 +55,8 @@ go run .
 ```bash
 curl http://127.0.0.1:8080/healthz
 curl http://127.0.0.1:8080/readyz
+curl http://127.0.0.1:8080/api/healthz
+curl http://127.0.0.1:8080/api/readyz
 curl http://127.0.0.1:8080/api/v1/version
 curl http://127.0.0.1:8080/metrics
 ```

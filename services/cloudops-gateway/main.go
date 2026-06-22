@@ -26,6 +26,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthzHandler)
 	mux.HandleFunc("/readyz", readyzHandler)
+	mux.HandleFunc("/api/healthz", healthzHandler)
+	mux.HandleFunc("/api/readyz", readyzHandler)
 	mux.HandleFunc("/api/v1/version", versionHandler)
 	mux.HandleFunc("/metrics", metricsHandler)
 	mux.HandleFunc("/", notFoundHandler)
