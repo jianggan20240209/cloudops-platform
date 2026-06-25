@@ -200,7 +200,9 @@ EOF
 
                           APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
-                          if echo "${APP_JSON}" | grep -q "\"name\":\"app.imageTag\",\"value\":\"${IMAGE_TAG}\""; then
+                          SPEC_JSON="$(printf '%s' "${APP_JSON}" | sed 's/,"status":.*//')"
+                          if printf '%s' "${SPEC_JSON}" | grep -q '"name":"app.imageTag"' && \
+                             printf '%s' "${SPEC_JSON}" | grep -q '"value":"'"${IMAGE_TAG}"'"'; then
                             echo "Argo CD app.imageTag updated to ${IMAGE_TAG}"
                           else
                             echo "${APP_JSON}"
