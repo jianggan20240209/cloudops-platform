@@ -1,0 +1,272 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  imagePullSecrets:
+    - name: harbor-pull-secret
+  containers:
+    - name: kaniko
+      image: harbor-server.jianggan.cn/kaniko/executor:v1.24.0-debug
+      imagePullPolicy: IfNotPresent
+      env:
+        - name: HTTP_PROXY
+          value: "http://192.168.1.50:7890"
+        - name: HTTPS_PROXY
+          value: "http://192.168.1.50:7890"
+        - name: http_proxy
+          value: "http://192.168.1.50:7890"
+        - name: https_proxy
+          value: "http://192.168.1.50:7890"
+        - name: NO_PROXY
+          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn"
+        - name: no_proxy
+          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn"
+      command:
+        - sleep
+      args:
+        - "999999"
+      volumeMounts:
+        - name: docker-config
+          mountPath: /kaniko/.docker
+        - name: jianggan-root-ca
+          mountPath: /kaniko/certs
+          readOnly: true
+    - name: curl
+      image: curlimages/curl:8.16.0
+      imagePullPolicy: IfNotPresent
+      command:
+        - cat
+      tty: true
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+  volumes:
+    - name: docker-config
+      secret:
+        secretName: harbor-pull-secret
+        items:
+          - key: .dockerconfigjson
+            path: config.json
+    - name: jianggan-root-ca
+      secret:
+        secretName: jianggan-root-ca
+'''
+        }
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+    }
+
+    environment {
+        IMAGE = "harbor-server.jianggan.cn/cloudops/cloudops-cicd"
+        IMAGE_TAG = "main-${BUILD_NUMBER}"
+        ARGOCD_SERVER = "https://argocd.jianggan.cn"
+        ARGOCD_APP_NAME = "cloudops-cicd-dev"
+        ARGOCD_APP_PATH = "dev/backend/deployment/go/base"
+        ARGOCD_VALUES_FILE = "values/cloudops-cicd.yaml"
+        HTTP_PROXY = "http://192.168.1.50:7890"
+        HTTPS_PROXY = "http://192.168.1.50:7890"
+        http_proxy = "http://192.168.1.50:7890"
+        https_proxy = "http://192.168.1.50:7890"
+        NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn"
+        no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn"
+    }
+
+    stages {
+        stage('Prepare Git') {
+            steps {
+                sh '''
+                  git --version
+                  git config --global http.version HTTP/1.1
+                  git config --global http.proxy "http://192.168.1.50:7890"
+                  git config --global https.proxy "http://192.168.1.50:7890"
+                  git config --global http.lowSpeedLimit 0
+                  git config --global http.lowSpeedTime 999999
+                  git config --global --list
+                '''
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    credentialsId: 'github-user',
+                    url: 'https://github.com/jianggan20240209/cloudops-platform.git'
+            }
+        }
+
+        stage('Show Build Context') {
+            steps {
+                sh '''
+                  echo "===== WORKSPACE ====="
+                  pwd
+                  echo "===== cloudops-cicd ====="
+                  find services/cloudops-cicd -maxdepth 2 -type f | sort
+                  GIT_COMMIT_SHORT="$(git rev-parse --short=12 HEAD)"
+                  BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  cat > "${WORKSPACE}/cicd-build.env" <<EOF
+GIT_COMMIT_SHORT=${GIT_COMMIT_SHORT}
+BUILD_TIME=${BUILD_TIME}
+EOF
+                  cat "${WORKSPACE}/cicd-build.env"
+                '''
+            }
+        }
+
+        stage('Build And Push Image') {
+            steps {
+                container('kaniko') {
+                    sh '''
+                      . "${WORKSPACE}/cicd-build.env"
+                      echo "IMAGE=${IMAGE}"
+                      echo "IMAGE_TAG=${IMAGE_TAG}"
+                      echo "GIT_COMMIT_SHORT=${GIT_COMMIT_SHORT}"
+                      echo "BUILD_TIME=${BUILD_TIME}"
+
+                      /kaniko/executor \
+                        --context "${WORKSPACE}/services/cloudops-cicd" \
+                        --dockerfile "${WORKSPACE}/services/cloudops-cicd/Dockerfile" \
+                        --destination "${IMAGE}:${IMAGE_TAG}" \
+                        --build-arg VERSION="${IMAGE_TAG}" \
+                        --build-arg COMMIT="${GIT_COMMIT_SHORT}" \
+                        --build-arg BUILD_TIME="${BUILD_TIME}" \
+                        --registry-certificate harbor-server.jianggan.cn=/kaniko/certs/jianggan-root-ca.crt
+                    '''
+                }
+            }
+        }
+
+        stage('Update Argo CD Helm Parameter') {
+            steps {
+                withCredentials([string(credentialsId: 'argocd-auth-token', variable: 'ARGOCD_AUTH_TOKEN')]) {
+                    container('curl') {
+                        sh '''
+                          set -eu
+                          cat > /tmp/argocd-patch.json <<EOF
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "Application",
+  "metadata": {
+    "name": "${ARGOCD_APP_NAME}",
+    "namespace": "argocd"
+  },
+  "spec": {
+    "project": "dev-backend",
+    "source": {
+      "repoURL": "https://github.com/jianggan20240209/cloudops-gitops.git",
+      "targetRevision": "main",
+      "path": "${ARGOCD_APP_PATH}",
+      "helm": {
+        "valueFiles": ["${ARGOCD_VALUES_FILE}"],
+        "parameters": [
+          {
+            "name": "app.imageTag",
+            "value": "${IMAGE_TAG}",
+            "forceString": true
+          }
+        ]
+      }
+    },
+    "destination": {
+      "server": "https://kubernetes.default.svc",
+      "namespace": "cloudops-dev"
+    },
+    "syncPolicy": {
+      "automated": {
+        "prune": true,
+        "selfHeal": true
+      },
+      "syncOptions": [
+        "CreateNamespace=true"
+      ]
+    }
+  }
+}
+EOF
+
+                          echo "Patch Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
+                          curl -fksS -X PUT "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
+                            -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}" \
+                            -H "Content-Type: application/json" \
+                            --data @/tmp/argocd-patch.json
+
+                          APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
+                            -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
+                          SPEC_JSON="$(printf '%s' "${APP_JSON}" | sed 's/,"status":.*//')"
+                          if printf '%s' "${SPEC_JSON}" | grep -q '"name":"app.imageTag"' && \
+                             printf '%s' "${SPEC_JSON}" | grep -q '"value":"'"${IMAGE_TAG}"'"'; then
+                            echo "Argo CD app.imageTag updated to ${IMAGE_TAG}"
+                          else
+                            echo "${APP_JSON}"
+                            echo "Failed to update app.imageTag to ${IMAGE_TAG}"
+                            exit 1
+                          fi
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Sync Argo CD Application') {
+            steps {
+                withCredentials([string(credentialsId: 'argocd-auth-token', variable: 'ARGOCD_AUTH_TOKEN')]) {
+                    container('curl') {
+                        sh '''
+                          set -eu
+                          curl -ksS -X POST "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}/sync" \
+                            -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}" \
+                            -H "Content-Type: application/json" \
+                            --data '{"prune":true}'
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Wait Argo CD Healthy') {
+            steps {
+                withCredentials([string(credentialsId: 'argocd-auth-token', variable: 'ARGOCD_AUTH_TOKEN')]) {
+                    container('curl') {
+                        sh '''
+                          set -eu
+                          for i in $(seq 1 60); do
+                            APP_JSON="$(curl -ksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
+                              -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
+
+                            SYNC_STATUS="$(echo "${APP_JSON}" | sed -n 's/.*"sync":{"status":"\\([^"]*\\)".*/\\1/p')"
+                            HEALTH_STATUS="$(echo "${APP_JSON}" | sed -n 's/.*"health":{"status":"\\([^"]*\\)".*/\\1/p')"
+                            OPERATION_PHASE="$(echo "${APP_JSON}" | sed -n 's/.*"operationState":{"phase":"\\([^"]*\\)".*/\\1/p')"
+
+                            echo "attempt=${i} sync=${SYNC_STATUS:-unknown} health=${HEALTH_STATUS:-unknown} operation=${OPERATION_PHASE:-none}"
+
+                            if [ "${SYNC_STATUS}" = "Synced" ] && [ "${HEALTH_STATUS}" = "Healthy" ]; then
+                              echo "Argo CD application ${ARGOCD_APP_NAME} synced and healthy"
+                              exit 0
+                            fi
+
+                            if [ "${OPERATION_PHASE}" = "Failed" ] || [ "${OPERATION_PHASE}" = "Error" ]; then
+                              echo "${APP_JSON}"
+                              echo "Argo CD application ${ARGOCD_APP_NAME} sync failed"
+                              exit 1
+                            fi
+
+                            sleep 5
+                          done
+
+                          echo "Timed out waiting for ${ARGOCD_APP_NAME} to become Synced/Healthy"
+                          exit 1
+                        '''
+                    }
+                }
+            }
+        }
+    }
+}
