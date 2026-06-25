@@ -200,9 +200,9 @@ EOF
 
                           APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
-                          CURRENT_TAG="$(echo "${APP_JSON}" | sed -n 's/.*"name":"app.imageTag","value":"\\([^"]*\\)".*/\\1/p')"
-                          echo "Argo CD current app.imageTag=${CURRENT_TAG:-unknown}"
-                          if [ "${CURRENT_TAG}" != "${IMAGE_TAG}" ]; then
+                          if echo "${APP_JSON}" | grep -q "\"name\":\"app.imageTag\",\"value\":\"${IMAGE_TAG}\""; then
+                            echo "Argo CD app.imageTag updated to ${IMAGE_TAG}"
+                          else
                             echo "${APP_JSON}"
                             echo "Failed to update app.imageTag to ${IMAGE_TAG}"
                             exit 1
