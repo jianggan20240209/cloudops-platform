@@ -152,7 +152,14 @@ EOF
                           set -eu
                           cat > /tmp/argocd-patch.json <<EOF
 {
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "Application",
+  "metadata": {
+    "name": "${ARGOCD_APP_NAME}",
+    "namespace": "argocd"
+  },
   "spec": {
+    "project": "dev-backend",
     "source": {
       "repoURL": "https://github.com/jianggan20240209/cloudops-gitops.git",
       "targetRevision": "main",
@@ -167,16 +174,39 @@ EOF
           }
         ]
       }
+    },
+    "destination": {
+      "server": "https://kubernetes.default.svc",
+      "namespace": "cloudops-dev"
+    },
+    "syncPolicy": {
+      "automated": {
+        "prune": true,
+        "selfHeal": true
+      },
+      "syncOptions": [
+        "CreateNamespace=true"
+      ]
     }
   }
 }
 EOF
 
                           echo "Patch Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
-                          curl -ksS -X PATCH "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
+                          curl -fksS -X PUT "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}" \
-                            -H "Content-Type: application/merge-patch+json" \
+                            -H "Content-Type: application/json" \
                             --data @/tmp/argocd-patch.json
+
+                          APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
+                            -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
+                          CURRENT_TAG="$(echo "${APP_JSON}" | sed -n 's/.*"name":"app.imageTag","value":"\\([^"]*\\)".*/\\1/p')"
+                          echo "Argo CD current app.imageTag=${CURRENT_TAG:-unknown}"
+                          if [ "${CURRENT_TAG}" != "${IMAGE_TAG}" ]; then
+                            echo "${APP_JSON}"
+                            echo "Failed to update app.imageTag to ${IMAGE_TAG}"
+                            exit 1
+                          fi
                         '''
                     }
                 }
