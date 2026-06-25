@@ -34,6 +34,13 @@ spec:
         - name: jianggan-root-ca
           mountPath: /kaniko/certs
           readOnly: true
+    - name: curl
+      image: curlimages/curl:8.16.0
+      imagePullPolicy: IfNotPresent
+      command:
+        - sleep
+      args:
+        - "999999"
   volumes:
     - name: docker-config
       secret:
@@ -51,11 +58,16 @@ spec:
     options {
         timestamps()
         disableConcurrentBuilds()
+        skipDefaultCheckout(true)
     }
 
     environment {
         IMAGE = "harbor-server.jianggan.cn/cloudops/cloudops-web"
         IMAGE_TAG = "main-${BUILD_NUMBER}"
+        ARGOCD_SERVER = "https://argocd.jianggan.cn"
+        ARGOCD_APP_NAME = "cloudops-web-dev"
+        ARGOCD_APP_PATH = "dev/frontend/deployment/ui/base"
+        ARGOCD_VALUES_FILE = "values/cloudops-web.yaml"
         HTTP_PROXY = "http://192.168.1.50:7890"
         HTTPS_PROXY = "http://192.168.1.50:7890"
         http_proxy = "http://192.168.1.50:7890"
@@ -106,9 +118,100 @@ spec:
                         --context "${WORKSPACE}/services/cloudops-web" \
                         --dockerfile "${WORKSPACE}/services/cloudops-web/Dockerfile" \
                         --destination "${IMAGE}:${IMAGE_TAG}" \
-                        --destination "${IMAGE}:latest" \
                         --registry-certificate harbor-server.jianggan.cn=/kaniko/certs/jianggan-root-ca.crt
                     '''
+                }
+            }
+        }
+
+        stage('Update Argo CD Helm Parameter') {
+            steps {
+                withCredentials([string(credentialsId: 'argocd-auth-token', variable: 'ARGOCD_AUTH_TOKEN')]) {
+                    container('curl') {
+                        sh '''
+                          set -eu
+                          cat > /tmp/argocd-patch.json <<EOF
+{
+  "spec": {
+    "source": {
+      "repoURL": "https://github.com/jianggan20240209/cloudops-gitops.git",
+      "targetRevision": "main",
+      "path": "${ARGOCD_APP_PATH}",
+      "helm": {
+        "valueFiles": ["${ARGOCD_VALUES_FILE}"],
+        "parameters": [
+          {
+            "name": "app.imageTag",
+            "value": "${IMAGE_TAG}",
+            "forceString": true
+          }
+        ]
+      }
+    }
+  }
+}
+EOF
+
+                          curl -ksS -X PATCH "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
+                            -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}" \
+                            -H "Content-Type: application/merge-patch+json" \
+                            --data @/tmp/argocd-patch.json
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Sync Argo CD Application') {
+            steps {
+                withCredentials([string(credentialsId: 'argocd-auth-token', variable: 'ARGOCD_AUTH_TOKEN')]) {
+                    container('curl') {
+                        sh '''
+                          set -eu
+                          curl -ksS -X POST "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}/sync" \
+                            -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}" \
+                            -H "Content-Type: application/json" \
+                            --data '{"prune":true}'
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Wait Argo CD Healthy') {
+            steps {
+                withCredentials([string(credentialsId: 'argocd-auth-token', variable: 'ARGOCD_AUTH_TOKEN')]) {
+                    container('curl') {
+                        sh '''
+                          set -eu
+                          for i in $(seq 1 60); do
+                            APP_JSON="$(curl -ksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
+                              -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
+
+                            SYNC_STATUS="$(echo "${APP_JSON}" | sed -n 's/.*"sync":{"status":"\\([^"]*\\)".*/\\1/p')"
+                            HEALTH_STATUS="$(echo "${APP_JSON}" | sed -n 's/.*"health":{"status":"\\([^"]*\\)".*/\\1/p')"
+                            OPERATION_PHASE="$(echo "${APP_JSON}" | sed -n 's/.*"operationState":{"phase":"\\([^"]*\\)".*/\\1/p')"
+
+                            echo "attempt=${i} sync=${SYNC_STATUS:-unknown} health=${HEALTH_STATUS:-unknown} operation=${OPERATION_PHASE:-none}"
+
+                            if [ "${SYNC_STATUS}" = "Synced" ] && [ "${HEALTH_STATUS}" = "Healthy" ]; then
+                              echo "Argo CD application ${ARGOCD_APP_NAME} synced and healthy"
+                              exit 0
+                            fi
+
+                            if [ "${OPERATION_PHASE}" = "Failed" ] || [ "${OPERATION_PHASE}" = "Error" ]; then
+                              echo "${APP_JSON}"
+                              echo "Argo CD application ${ARGOCD_APP_NAME} sync failed"
+                              exit 1
+                            fi
+
+                            sleep 5
+                          done
+
+                          echo "Timed out waiting for ${ARGOCD_APP_NAME} to become Synced/Healthy"
+                          exit 1
+                        '''
+                    }
                 }
             }
         }
