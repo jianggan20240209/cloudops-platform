@@ -736,28 +736,43 @@ func newReleaseRecordStore() ReleaseRecordStore {
 		return NewMemoryReleaseRecordStore()
 	}
 
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		log.Printf("failed to open postgres release record store, fallback to memory: %v", err)
-		return NewMemoryReleaseRecordStore()
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
-		log.Printf("failed to ping postgres release record store, fallback to memory: %v", err)
-		return NewMemoryReleaseRecordStore()
+	var lastErr error
+	for attempt := 1; attempt <= 10; attempt++ {
+		db, err := sql.Open("postgres", dsn)
+		if err != nil {
+			lastErr = err
+			log.Printf("failed to open postgres release record store attempt=%d: %v", attempt, err)
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := db.PingContext(ctx); err != nil {
+			cancel()
+			_ = db.Close()
+			lastErr = err
+			log.Printf("failed to ping postgres release record store attempt=%d: %v", attempt, err)
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
+		store := &PostgresReleaseRecordStore{db: db}
+		if err := store.ensureSchema(ctx); err != nil {
+			cancel()
+			_ = db.Close()
+			lastErr = err
+			log.Printf("failed to initialize postgres release record schema attempt=%d: %v", attempt, err)
+			time.Sleep(3 * time.Second)
+			continue
+		}
+		cancel()
+
+		log.Printf("release record store=postgres")
+		return store
 	}
 
-	store := &PostgresReleaseRecordStore{db: db}
-	if err := store.ensureSchema(ctx); err != nil {
-		_ = db.Close()
-		log.Printf("failed to initialize postgres release record schema, fallback to memory: %v", err)
-		return NewMemoryReleaseRecordStore()
-	}
-
-	log.Printf("release record store=postgres")
-	return store
+	log.Fatalf("postgres release record store is configured but unavailable: %v", lastErr)
+	return nil
 }
 
 func NewMemoryReleaseRecordStore() *MemoryReleaseRecordStore {

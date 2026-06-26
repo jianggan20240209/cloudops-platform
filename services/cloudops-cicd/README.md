@@ -112,6 +112,8 @@ harbor-server.jianggan.cn/cloudops/cloudops-cicd:<tag>
 
 内存存储只适合本地开发或单副本实验。多副本部署时，每个 Pod 都有独立内存，Jenkins 写入的记录只会保存在收到请求的那个 Pod 上；后续 GET 请求如果被 Service 转发到其他 Pod，可能看不到同一条写入记录。需要可靠发布审计、回滚候选和多副本一致查询时，必须启用 PostgreSQL。
 
+GitOps Helm chart 已支持为 `cloudops-cicd` 启用内置 PostgreSQL StatefulSet。启用后，服务会通过 `RELEASE_RECORD_DATABASE_URL` 连接数据库，并自动创建 `release_records` 表。只要配置了 PostgreSQL DSN，服务就不会静默回退到内存存储；如果数据库不可用，服务会重试连接并失败退出，避免发布审计产生假一致性。
+
 Jenkins 可以在镜像构建、Argo CD 同步、健康检查完成后写入一条真实发布记录。回滚候选接口会从发布记录中筛选 `status=succeeded` 且 `verification.ready=true` 的历史版本，并排除当前运行 tag。
 
 ## 本地运行
