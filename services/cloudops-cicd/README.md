@@ -110,6 +110,8 @@ harbor-server.jianggan.cn/cloudops/cloudops-cicd:<tag>
 - 实时记录：由 Argo CD、Harbor、Prometheus 聚合结果生成。
 - 写入记录：由 `POST /api/v1/cicd/releases/records` 写入，未配置数据库时保存在内存中，配置 PostgreSQL DSN 后持久化到 `release_records` 表。
 
+内存存储只适合本地开发或单副本实验。多副本部署时，每个 Pod 都有独立内存，Jenkins 写入的记录只会保存在收到请求的那个 Pod 上；后续 GET 请求如果被 Service 转发到其他 Pod，可能看不到同一条写入记录。需要可靠发布审计、回滚候选和多副本一致查询时，必须启用 PostgreSQL。
+
 Jenkins 可以在镜像构建、Argo CD 同步、健康检查完成后写入一条真实发布记录。回滚候选接口会从发布记录中筛选 `status=succeeded` 且 `verification.ready=true` 的历史版本，并排除当前运行 tag。
 
 ## 本地运行
