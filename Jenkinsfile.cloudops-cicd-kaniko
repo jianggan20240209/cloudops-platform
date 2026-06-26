@@ -72,6 +72,7 @@ spec:
         ARGOCD_APP_NAME = "cloudops-cicd-dev"
         ARGOCD_APP_PATH = "dev/backend/deployment/go/base"
         ARGOCD_VALUES_FILE = "values/cloudops-cicd.yaml"
+        CLOUDOPS_CICD_SERVER = "https://cloudops.jianggan.cn"
         HTTP_PROXY = "http://192.168.1.50:7890"
         HTTPS_PROXY = "http://192.168.1.50:7890"
         http_proxy = "http://192.168.1.50:7890"
@@ -263,6 +264,71 @@ EOF
 
                           echo "Timed out waiting for ${ARGOCD_APP_NAME} to become Synced/Healthy"
                           exit 1
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Report Release Record') {
+            steps {
+                withCredentials([string(credentialsId: 'argocd-auth-token', variable: 'ARGOCD_AUTH_TOKEN')]) {
+                    container('curl') {
+                        sh '''
+                          set -eu
+                          . "${WORKSPACE}/cicd-build.env"
+
+                          APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
+                            -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
+                          SYNC_STATUS="$(echo "${APP_JSON}" | sed -n 's/.*"sync":{"status":"\\([^"]*\\)".*/\\1/p')"
+                          HEALTH_STATUS="$(echo "${APP_JSON}" | sed -n 's/.*"health":{"status":"\\([^"]*\\)".*/\\1/p')"
+                          ARGOCD_REVISION="$(echo "${APP_JSON}" | sed -n 's/.*"revision":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                          VERIFIED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+                          cat > /tmp/release-record.json <<EOF
+{
+  "app_name": "cloudops-cicd",
+  "env": "dev",
+  "namespace": "cloudops-dev",
+  "jenkins_job": "${JOB_NAME}",
+  "jenkins_build": "${BUILD_NUMBER}",
+  "image": "${IMAGE}:${IMAGE_TAG}",
+  "image_tag": "${IMAGE_TAG}",
+  "argocd_app": "${ARGOCD_APP_NAME}",
+  "argocd_revision": "${ARGOCD_REVISION}",
+  "argocd_sync": "${SYNC_STATUS}",
+  "argocd_health": "${HEALTH_STATUS}",
+  "status": "succeeded",
+  "source": "jenkins",
+  "created_at": "${BUILD_TIME}",
+  "verification": {
+    "ready": true,
+    "verified_at": "${VERIFIED_AT}",
+    "checks": [
+      {
+        "name": "jenkins_build",
+        "status": "pass",
+        "message": "Jenkins image build and push completed"
+      },
+      {
+        "name": "argocd_sync",
+        "status": "pass",
+        "message": "Argo CD Application is synced"
+      },
+      {
+        "name": "argocd_health",
+        "status": "pass",
+        "message": "Argo CD Application is healthy"
+      }
+    ]
+  }
+}
+EOF
+
+                          echo "Report release record image=${IMAGE}:${IMAGE_TAG}"
+                          curl -fksS -X POST "${CLOUDOPS_CICD_SERVER}/api/v1/cicd/releases/records" \
+                            -H "Content-Type: application/json" \
+                            --data @/tmp/release-record.json
                         '''
                     }
                 }

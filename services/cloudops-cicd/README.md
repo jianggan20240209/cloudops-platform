@@ -43,6 +43,8 @@ services/cloudops-cicd
 | `/api/v1/cicd/apps/{name}/records` | 发布批次记录列表 |
 | `/api/v1/cicd/apps/{name}/records/latest` | 最新发布批次记录 |
 | `/api/v1/cicd/apps/{name}/records/{id}` | 指定发布批次记录 |
+| `POST /api/v1/cicd/releases/records` | 写入发布批次记录 |
+| `/api/v1/cicd/apps/{name}/rollback-candidates` | 查询可回滚候选版本 |
 | `/metrics` | Prometheus 指标 |
 
 ## 镜像名称
@@ -64,6 +66,9 @@ harbor-server.jianggan.cn/cloudops/cloudops-cicd:<tag>
 | `HARBOR_PASSWORD` | 空 | Harbor 密码或 Robot Token |
 | `HARBOR_INSECURE` | `true` | 是否跳过 Harbor HTTPS 证书校验 |
 | `PROMETHEUS_SERVER` | 空 | Prometheus API 地址，例如 `http://kube-prometheus-stack-prometheus.monitoring.svc:9090` |
+| `RELEASE_RECORD_DATABASE_URL` | 空 | PostgreSQL DSN，未配置时使用内存存储 |
+| `POSTGRES_DSN` | 空 | PostgreSQL DSN 兼容变量，优先级低于 `RELEASE_RECORD_DATABASE_URL` |
+| `RELEASE_RECORD_WRITE_TOKEN` | 空 | 发布记录写入 token；为空时不校验写入 token |
 
 未设置 `ARGOCD_SERVER` 或 `ARGOCD_AUTH_TOKEN` 时，接口会返回静态数据，并在响应中标记：
 
@@ -100,7 +105,12 @@ harbor-server.jianggan.cn/cloudops/cloudops-cicd:<tag>
 - Argo CD：`argocd_app`、`argocd_revision`、`argocd_sync`、`argocd_health`。
 - 验证结果：`verification.ready`、`verification.checks`、`verification.metrics`、`verification.verified_at`。
 
-当前 v6 版本先提供只读发布记录模型：最新记录由实时 Argo CD、Harbor、Prometheus 聚合结果生成，历史记录来自内置发布历史。后续接入数据库或对象存储后，可以由 Jenkins 在发布完成后写入真实不可变记录，为灰度、回滚和审计提供数据基础。
+当前版本支持两类发布记录：
+
+- 实时记录：由 Argo CD、Harbor、Prometheus 聚合结果生成。
+- 写入记录：由 `POST /api/v1/cicd/releases/records` 写入，未配置数据库时保存在内存中，配置 PostgreSQL DSN 后持久化到 `release_records` 表。
+
+Jenkins 可以在镜像构建、Argo CD 同步、健康检查完成后写入一条真实发布记录。回滚候选接口会从发布记录中筛选 `status=succeeded` 且 `verification.ready=true` 的历史版本，并排除当前运行 tag。
 
 ## 本地运行
 
@@ -126,5 +136,9 @@ curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/verify
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records/latest
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records/dev-cloudops-gateway-main-14
+curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/rollback-candidates
+curl -X POST http://127.0.0.1:8080/api/v1/cicd/releases/records \
+  -H 'Content-Type: application/json' \
+  --data '{"app_name":"cloudops-gateway","env":"dev","namespace":"cloudops-dev","image":"harbor-server.jianggan.cn/cloudops/cloudops-gateway:main-15","image_tag":"main-15","argocd_app":"cloudops-gateway-dev","argocd_sync":"Synced","argocd_health":"Healthy","status":"succeeded","verification":{"ready":true}}'
 curl http://127.0.0.1:8080/metrics
 ```

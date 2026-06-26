@@ -1,24 +1,32 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	_ "github.com/lib/pq"
 )
 
 var (
-	version   = "dev"
-	commit    = "unknown"
-	buildTime = "unknown"
-	startedAt = time.Now()
+	version     = "dev"
+	commit      = "unknown"
+	buildTime   = "unknown"
+	startedAt   = time.Now()
+	recordStore ReleaseRecordStore
 )
 
 type envelope map[string]any
@@ -240,6 +248,22 @@ type ReleaseRecord struct {
 	CreatedAt      string              `json:"created_at"`
 }
 
+type ReleaseRecordStore interface {
+	Save(ctx context.Context, record ReleaseRecord) (ReleaseRecord, error)
+	ListByApp(ctx context.Context, appName string) ([]ReleaseRecord, error)
+	Get(ctx context.Context, id string) (ReleaseRecord, bool, error)
+	Source() string
+}
+
+type MemoryReleaseRecordStore struct {
+	mu      sync.RWMutex
+	records map[string]ReleaseRecord
+}
+
+type PostgresReleaseRecordStore struct {
+	db *sql.DB
+}
+
 type prometheusQueryResponse struct {
 	Status string `json:"status"`
 	Data   struct {
@@ -254,6 +278,7 @@ type prometheusQueryResponse struct {
 
 func main() {
 	addr := env("HTTP_ADDR", ":8080")
+	recordStore = newReleaseRecordStore()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthzHandler)
@@ -263,6 +288,7 @@ func main() {
 	mux.HandleFunc("/api/v1/version", versionHandler)
 	mux.HandleFunc("/api/v1/cicd/apps", appsHandler)
 	mux.HandleFunc("/api/v1/cicd/apps/", appDetailHandler)
+	mux.HandleFunc("/api/v1/cicd/releases/records", releaseRecordsHandler)
 	mux.HandleFunc("/metrics", metricsHandler)
 	mux.HandleFunc("/", notFoundHandler)
 
@@ -521,12 +547,13 @@ func appDetailHandler(w http.ResponseWriter, r *http.Request) {
 			"generated_at": detail.GeneratedAt,
 		})
 	case "records":
-		records := buildReleaseRecords(app)
+		records := loadReleaseRecords(r.Context(), app)
 		if len(parts) == 2 {
 			writeJSON(w, http.StatusOK, envelope{
-				"name":  app.Name,
-				"items": records,
-				"total": len(records),
+				"name":   app.Name,
+				"items":  records,
+				"total":  len(records),
+				"source": recordStore.Source(),
 			})
 			return
 		}
@@ -557,9 +584,62 @@ func appDetailHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, record)
+	case "rollback-candidates":
+		if len(parts) != 2 {
+			notFoundHandler(w, r)
+			return
+		}
+		records := loadReleaseRecords(r.Context(), app)
+		candidates := rollbackCandidates(app, records)
+		writeJSON(w, http.StatusOK, envelope{
+			"name":        app.Name,
+			"current_tag": app.CurrentTag,
+			"items":       candidates,
+			"total":       len(candidates),
+			"source":      recordStore.Source(),
+		})
 	default:
 		notFoundHandler(w, r)
 	}
+}
+
+func releaseRecordsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/api/v1/cicd/releases/records" {
+		notFoundHandler(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !authorizedReleaseRecordWrite(r) {
+		writeJSON(w, http.StatusUnauthorized, envelope{
+			"error":   "unauthorized",
+			"message": "release record write token is invalid",
+		})
+		return
+	}
+
+	defer r.Body.Close()
+	var record ReleaseRecord
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&record); err != nil {
+		writeJSON(w, http.StatusBadRequest, envelope{
+			"error":   "invalid_json",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	record, err := recordStore.Save(r.Context(), record)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, envelope{
+			"error":   "release_record_save_failed",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, record)
 }
 
 func buildReleaseDetail(app AppSummary) ReleaseDetail {
@@ -623,6 +703,247 @@ func buildReleaseRecords(app AppSummary) []ReleaseRecord {
 	}
 
 	return records
+}
+
+func loadReleaseRecords(ctx context.Context, app AppSummary) []ReleaseRecord {
+	recordsByID := make(map[string]ReleaseRecord)
+	for _, record := range buildReleaseRecords(app) {
+		recordsByID[record.ID] = record
+	}
+
+	if recordStore != nil {
+		stored, err := recordStore.ListByApp(ctx, app.Name)
+		if err != nil {
+			log.Printf("failed to list release records app=%s: %v", app.Name, err)
+		}
+		for _, record := range stored {
+			recordsByID[record.ID] = record
+		}
+	}
+
+	records := make([]ReleaseRecord, 0, len(recordsByID))
+	for _, record := range recordsByID {
+		records = append(records, record)
+	}
+	sortReleaseRecords(records)
+	return records
+}
+
+func newReleaseRecordStore() ReleaseRecordStore {
+	dsn := firstNonEmpty(os.Getenv("RELEASE_RECORD_DATABASE_URL"), os.Getenv("POSTGRES_DSN"))
+	if strings.TrimSpace(dsn) == "" {
+		log.Printf("release record store=memory")
+		return NewMemoryReleaseRecordStore()
+	}
+
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		log.Printf("failed to open postgres release record store, fallback to memory: %v", err)
+		return NewMemoryReleaseRecordStore()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		log.Printf("failed to ping postgres release record store, fallback to memory: %v", err)
+		return NewMemoryReleaseRecordStore()
+	}
+
+	store := &PostgresReleaseRecordStore{db: db}
+	if err := store.ensureSchema(ctx); err != nil {
+		_ = db.Close()
+		log.Printf("failed to initialize postgres release record schema, fallback to memory: %v", err)
+		return NewMemoryReleaseRecordStore()
+	}
+
+	log.Printf("release record store=postgres")
+	return store
+}
+
+func NewMemoryReleaseRecordStore() *MemoryReleaseRecordStore {
+	return &MemoryReleaseRecordStore{records: make(map[string]ReleaseRecord)}
+}
+
+func (s *MemoryReleaseRecordStore) Save(_ context.Context, record ReleaseRecord) (ReleaseRecord, error) {
+	normalized, err := normalizeReleaseRecord(record)
+	if err != nil {
+		return ReleaseRecord{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records[normalized.ID] = normalized
+	return normalized, nil
+}
+
+func (s *MemoryReleaseRecordStore) ListByApp(_ context.Context, appName string) ([]ReleaseRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	records := make([]ReleaseRecord, 0)
+	for _, record := range s.records {
+		if record.AppName == appName {
+			records = append(records, record)
+		}
+	}
+	sortReleaseRecords(records)
+	return records, nil
+}
+
+func (s *MemoryReleaseRecordStore) Get(_ context.Context, id string) (ReleaseRecord, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.records[id]
+	return record, ok, nil
+}
+
+func (s *MemoryReleaseRecordStore) Source() string {
+	return "memory"
+}
+
+func (s *PostgresReleaseRecordStore) ensureSchema(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS release_records (
+  id TEXT PRIMARY KEY,
+  app_name TEXT NOT NULL,
+  env TEXT NOT NULL,
+  namespace TEXT NOT NULL,
+  jenkins_job TEXT NOT NULL,
+  jenkins_build TEXT NOT NULL,
+  image TEXT NOT NULL,
+  image_tag TEXT NOT NULL,
+  image_digest TEXT NOT NULL,
+  argocd_app TEXT NOT NULL,
+  argocd_revision TEXT NOT NULL,
+  argocd_sync TEXT NOT NULL,
+  argocd_health TEXT NOT NULL,
+  status TEXT NOT NULL,
+  verification JSONB NOT NULL,
+  source TEXT NOT NULL,
+  created_at TEXT NOT NULL
+)`)
+	return err
+}
+
+func (s *PostgresReleaseRecordStore) Save(ctx context.Context, record ReleaseRecord) (ReleaseRecord, error) {
+	normalized, err := normalizeReleaseRecord(record)
+	if err != nil {
+		return ReleaseRecord{}, err
+	}
+	verification, err := json.Marshal(normalized.Verification)
+	if err != nil {
+		return ReleaseRecord{}, err
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO release_records (
+  id, app_name, env, namespace, jenkins_job, jenkins_build,
+  image, image_tag, image_digest,
+  argocd_app, argocd_revision, argocd_sync, argocd_health,
+  status, verification, source, created_at
+) VALUES (
+  $1, $2, $3, $4, $5, $6,
+  $7, $8, $9,
+  $10, $11, $12, $13,
+  $14, $15::jsonb, $16, $17
+)
+ON CONFLICT (id) DO UPDATE SET
+  app_name = EXCLUDED.app_name,
+  env = EXCLUDED.env,
+  namespace = EXCLUDED.namespace,
+  jenkins_job = EXCLUDED.jenkins_job,
+  jenkins_build = EXCLUDED.jenkins_build,
+  image = EXCLUDED.image,
+  image_tag = EXCLUDED.image_tag,
+  image_digest = EXCLUDED.image_digest,
+  argocd_app = EXCLUDED.argocd_app,
+  argocd_revision = EXCLUDED.argocd_revision,
+  argocd_sync = EXCLUDED.argocd_sync,
+  argocd_health = EXCLUDED.argocd_health,
+  status = EXCLUDED.status,
+  verification = EXCLUDED.verification,
+  source = EXCLUDED.source,
+  created_at = EXCLUDED.created_at`,
+		normalized.ID, normalized.AppName, normalized.Env, normalized.Namespace, normalized.JenkinsJob, normalized.JenkinsBuild,
+		normalized.Image, normalized.ImageTag, normalized.ImageDigest,
+		normalized.ArgoCDApp, normalized.ArgoCDRevision, normalized.ArgoCDSync, normalized.ArgoCDHealth,
+		normalized.Status, string(verification), normalized.Source, normalized.CreatedAt,
+	)
+	if err != nil {
+		return ReleaseRecord{}, err
+	}
+	return normalized, nil
+}
+
+func (s *PostgresReleaseRecordStore) ListByApp(ctx context.Context, appName string) ([]ReleaseRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, app_name, env, namespace, jenkins_job, jenkins_build,
+       image, image_tag, image_digest,
+       argocd_app, argocd_revision, argocd_sync, argocd_health,
+       status, verification, source, created_at
+FROM release_records
+WHERE app_name = $1
+ORDER BY created_at DESC`, appName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	records := make([]ReleaseRecord, 0)
+	for rows.Next() {
+		record, err := scanReleaseRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sortReleaseRecords(records)
+	return records, nil
+}
+
+func (s *PostgresReleaseRecordStore) Get(ctx context.Context, id string) (ReleaseRecord, bool, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, app_name, env, namespace, jenkins_job, jenkins_build,
+       image, image_tag, image_digest,
+       argocd_app, argocd_revision, argocd_sync, argocd_health,
+       status, verification, source, created_at
+FROM release_records
+WHERE id = $1`, id)
+
+	record, err := scanReleaseRecord(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ReleaseRecord{}, false, nil
+	}
+	if err != nil {
+		return ReleaseRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+func (s *PostgresReleaseRecordStore) Source() string {
+	return "postgres"
+}
+
+type releaseRecordScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanReleaseRecord(scanner releaseRecordScanner) (ReleaseRecord, error) {
+	var record ReleaseRecord
+	var verification []byte
+	if err := scanner.Scan(
+		&record.ID, &record.AppName, &record.Env, &record.Namespace, &record.JenkinsJob, &record.JenkinsBuild,
+		&record.Image, &record.ImageTag, &record.ImageDigest,
+		&record.ArgoCDApp, &record.ArgoCDRevision, &record.ArgoCDSync, &record.ArgoCDHealth,
+		&record.Status, &verification, &record.Source, &record.CreatedAt,
+	); err != nil {
+		return ReleaseRecord{}, err
+	}
+	if err := json.Unmarshal(verification, &record.Verification); err != nil {
+		return ReleaseRecord{}, err
+	}
+	return record, nil
 }
 
 func releaseRecordFromDetail(app AppSummary, detail ReleaseDetail) ReleaseRecord {
@@ -1006,7 +1327,7 @@ func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 func methodNotAllowed(w http.ResponseWriter) {
 	writeJSON(w, http.StatusMethodNotAllowed, envelope{
 		"error":   "method_not_allowed",
-		"message": "only GET is supported",
+		"message": "method is not supported for this route",
 	})
 }
 
@@ -1055,6 +1376,79 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeReleaseRecord(record ReleaseRecord) (ReleaseRecord, error) {
+	record.AppName = strings.TrimSpace(record.AppName)
+	record.ImageTag = strings.TrimSpace(record.ImageTag)
+	if record.AppName == "" {
+		return ReleaseRecord{}, fmt.Errorf("app_name is required")
+	}
+	if record.ImageTag == "" {
+		return ReleaseRecord{}, fmt.Errorf("image_tag is required")
+	}
+
+	record.Env = firstNonEmpty(record.Env, "dev")
+	record.Namespace = firstNonEmpty(record.Namespace, "cloudops-dev")
+	record.ID = firstNonEmpty(record.ID, releaseRecordID(record.Env, record.AppName, record.ImageTag))
+	record.JenkinsJob = firstNonEmpty(record.JenkinsJob, jenkinsJobName(record.AppName))
+	record.JenkinsBuild = firstNonEmpty(record.JenkinsBuild, jenkinsBuildNumber(record.ImageTag))
+	record.Status = firstNonEmpty(record.Status, releaseRecordStatus(record.Verification.Ready))
+	record.Source = firstNonEmpty(record.Source, "api")
+	record.CreatedAt = firstNonEmpty(record.CreatedAt, time.Now().UTC().Format(time.RFC3339))
+	record.Verification.VerifiedAt = firstNonEmpty(record.Verification.VerifiedAt, record.CreatedAt)
+	return record, nil
+}
+
+func rollbackCandidates(app AppSummary, records []ReleaseRecord) []ReleaseRecord {
+	candidates := make([]ReleaseRecord, 0)
+	for _, record := range records {
+		if record.AppName != app.Name {
+			continue
+		}
+		if record.ImageTag == "" || record.ImageTag == app.CurrentTag {
+			continue
+		}
+		if record.Status != "succeeded" || !record.Verification.Ready {
+			continue
+		}
+		candidates = append(candidates, record)
+	}
+	sortReleaseRecords(candidates)
+	return candidates
+}
+
+func sortReleaseRecords(records []ReleaseRecord) {
+	sort.SliceStable(records, func(i, j int) bool {
+		left, leftOK := parseReleaseRecordTime(records[i].CreatedAt)
+		right, rightOK := parseReleaseRecordTime(records[j].CreatedAt)
+		if leftOK && rightOK {
+			return left.After(right)
+		}
+		return records[i].CreatedAt > records[j].CreatedAt
+	})
+}
+
+func parseReleaseRecordTime(value string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func authorizedReleaseRecordWrite(r *http.Request) bool {
+	token := strings.TrimSpace(os.Getenv("RELEASE_RECORD_WRITE_TOKEN"))
+	if token == "" {
+		return true
+	}
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	if strings.HasPrefix(auth, "Bearer ") && strings.TrimSpace(strings.TrimPrefix(auth, "Bearer ")) == token {
+		return true
+	}
+	return strings.TrimSpace(r.Header.Get("X-Release-Record-Token")) == token
 }
 
 func imageTag(image string, fallback string) string {
