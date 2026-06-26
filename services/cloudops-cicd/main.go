@@ -212,6 +212,34 @@ type ReleaseDetail struct {
 	GeneratedAt string            `json:"generated_at"`
 }
 
+type ReleaseVerification struct {
+	Ready      bool           `json:"ready"`
+	Checks     []CheckResult  `json:"checks"`
+	Metrics    MetricsSummary `json:"metrics"`
+	Warnings   []string       `json:"warnings,omitempty"`
+	VerifiedAt string         `json:"verified_at"`
+}
+
+type ReleaseRecord struct {
+	ID             string              `json:"id"`
+	AppName        string              `json:"app_name"`
+	Env            string              `json:"env"`
+	Namespace      string              `json:"namespace"`
+	JenkinsJob     string              `json:"jenkins_job"`
+	JenkinsBuild   string              `json:"jenkins_build,omitempty"`
+	Image          string              `json:"image"`
+	ImageTag       string              `json:"image_tag"`
+	ImageDigest    string              `json:"image_digest,omitempty"`
+	ArgoCDApp      string              `json:"argocd_app"`
+	ArgoCDRevision string              `json:"argocd_revision,omitempty"`
+	ArgoCDSync     string              `json:"argocd_sync"`
+	ArgoCDHealth   string              `json:"argocd_health"`
+	Status         string              `json:"status"`
+	Verification   ReleaseVerification `json:"verification"`
+	Source         string              `json:"source"`
+	CreatedAt      string              `json:"created_at"`
+}
+
 type prometheusQueryResponse struct {
 	Status string `json:"status"`
 	Data   struct {
@@ -492,6 +520,43 @@ func appDetailHandler(w http.ResponseWriter, r *http.Request) {
 			"warnings":     detail.Warnings,
 			"generated_at": detail.GeneratedAt,
 		})
+	case "records":
+		records := buildReleaseRecords(app)
+		if len(parts) == 2 {
+			writeJSON(w, http.StatusOK, envelope{
+				"name":  app.Name,
+				"items": records,
+				"total": len(records),
+			})
+			return
+		}
+		if len(parts) > 3 {
+			notFoundHandler(w, r)
+			return
+		}
+		if parts[2] == "latest" {
+			if len(records) == 0 {
+				writeJSON(w, http.StatusNotFound, envelope{
+					"error":   "release_record_not_found",
+					"message": "release record not found",
+					"name":    app.Name,
+				})
+				return
+			}
+			writeJSON(w, http.StatusOK, records[0])
+			return
+		}
+		record, ok := findReleaseRecord(records, parts[2])
+		if !ok {
+			writeJSON(w, http.StatusNotFound, envelope{
+				"error":     "release_record_not_found",
+				"message":   "release record not found",
+				"name":      app.Name,
+				"record_id": parts[2],
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, record)
 	default:
 		notFoundHandler(w, r)
 	}
@@ -544,6 +609,101 @@ func buildReleaseDetail(app AppSummary) ReleaseDetail {
 		Warnings:    warnings,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 	}
+}
+
+func buildReleaseRecords(app AppSummary) []ReleaseRecord {
+	detail := buildReleaseDetail(app)
+	records := []ReleaseRecord{releaseRecordFromDetail(app, detail)}
+
+	for _, release := range releases[app.Name] {
+		if release.Version == app.CurrentTag {
+			continue
+		}
+		records = append(records, releaseRecordFromSummary(app, release))
+	}
+
+	return records
+}
+
+func releaseRecordFromDetail(app AppSummary, detail ReleaseDetail) ReleaseRecord {
+	image := imageByTag(detail.Images, app.CurrentTag)
+	createdAt := firstNonEmpty(image.PushedAt, app.UpdatedAt, detail.GeneratedAt)
+
+	return ReleaseRecord{
+		ID:             releaseRecordID(app.Env, app.Name, app.CurrentTag),
+		AppName:        app.Name,
+		Env:            app.Env,
+		Namespace:      app.Namespace,
+		JenkinsJob:     jenkinsJobName(app.Name),
+		JenkinsBuild:   jenkinsBuildNumber(app.CurrentTag),
+		Image:          app.Image,
+		ImageTag:       app.CurrentTag,
+		ImageDigest:    image.Digest,
+		ArgoCDApp:      app.ArgoCDApp,
+		ArgoCDRevision: app.Revision,
+		ArgoCDSync:     app.Sync,
+		ArgoCDHealth:   app.Health,
+		Status:         releaseRecordStatus(detail.Ready),
+		Verification: ReleaseVerification{
+			Ready:      detail.Ready,
+			Checks:     detail.Checks,
+			Metrics:    detail.Metrics,
+			Warnings:   detail.Warnings,
+			VerifiedAt: detail.GeneratedAt,
+		},
+		Source:    detail.Source,
+		CreatedAt: createdAt,
+	}
+}
+
+func releaseRecordFromSummary(app AppSummary, release ReleaseSummary) ReleaseRecord {
+	status := "unknown"
+	if release.Status == "Healthy" {
+		status = "succeeded"
+	}
+
+	return ReleaseRecord{
+		ID:             releaseRecordID(app.Env, app.Name, release.Version),
+		AppName:        app.Name,
+		Env:            app.Env,
+		Namespace:      app.Namespace,
+		JenkinsJob:     jenkinsJobName(app.Name),
+		JenkinsBuild:   jenkinsBuildNumber(release.Version),
+		Image:          imageWithTag(app.Image, release.Version),
+		ImageTag:       release.Version,
+		ArgoCDApp:      app.ArgoCDApp,
+		ArgoCDRevision: release.Commit,
+		ArgoCDSync:     app.Sync,
+		ArgoCDHealth:   release.Status,
+		Status:         status,
+		Verification: ReleaseVerification{
+			Ready: release.Status == "Healthy",
+			Checks: []CheckResult{
+				checkNotEmpty("image_tag", release.Version, "Release image tag is available"),
+			},
+			VerifiedAt: release.BuildTime,
+		},
+		Source:    "static",
+		CreatedAt: release.BuildTime,
+	}
+}
+
+func findReleaseRecord(records []ReleaseRecord, id string) (ReleaseRecord, bool) {
+	for _, record := range records {
+		if record.ID == id {
+			return record, true
+		}
+	}
+	return ReleaseRecord{}, false
+}
+
+func imageByTag(images []ImageTagSummary, tag string) ImageTagSummary {
+	for _, image := range images {
+		if image.Tag == tag {
+			return image
+		}
+	}
+	return ImageTagSummary{}
 }
 
 func buildReleaseChecks(app AppSummary, images []ImageTagSummary, metrics MetricsSummary) []CheckResult {
@@ -904,6 +1064,49 @@ func imageTag(image string, fallback string) string {
 		return image[lastColon+1:]
 	}
 	return fallback
+}
+
+func imageWithTag(image string, tag string) string {
+	if strings.TrimSpace(tag) == "" {
+		return image
+	}
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	if lastColon > lastSlash {
+		return image[:lastColon+1] + tag
+	}
+	return image + ":" + tag
+}
+
+func releaseRecordID(envName string, appName string, tag string) string {
+	return strings.Join([]string{
+		firstNonEmpty(envName, "unknown"),
+		firstNonEmpty(appName, "unknown"),
+		firstNonEmpty(tag, "unknown"),
+	}, "-")
+}
+
+func jenkinsJobName(appName string) string {
+	return "test-" + appName + "-kaniko"
+}
+
+func jenkinsBuildNumber(tag string) string {
+	index := strings.LastIndex(tag, "-")
+	if index < 0 || index == len(tag)-1 {
+		return ""
+	}
+	candidate := tag[index+1:]
+	if _, err := strconv.Atoi(candidate); err != nil {
+		return ""
+	}
+	return candidate
+}
+
+func releaseRecordStatus(ready bool) string {
+	if ready {
+		return "succeeded"
+	}
+	return "failed"
 }
 
 func label(value string) string {

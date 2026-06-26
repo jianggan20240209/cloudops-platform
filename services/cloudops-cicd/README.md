@@ -40,6 +40,9 @@ services/cloudops-cicd
 | `/api/v1/cicd/apps/{name}/release` | 聚合发布详情，合并 Argo CD、Harbor、Prometheus 数据 |
 | `/api/v1/cicd/apps/{name}/health` | 发布健康判断，只返回健康结论和检查项 |
 | `/api/v1/cicd/apps/{name}/verify` | 发布后验证结果，只返回镜像、tag、检查项和验证结论 |
+| `/api/v1/cicd/apps/{name}/records` | 发布批次记录列表 |
+| `/api/v1/cicd/apps/{name}/records/latest` | 最新发布批次记录 |
+| `/api/v1/cicd/apps/{name}/records/{id}` | 指定发布批次记录 |
 | `/metrics` | Prometheus 指标 |
 
 ## 镜像名称
@@ -88,6 +91,17 @@ harbor-server.jianggan.cn/cloudops/cloudops-cicd:<tag>
 
 接口会生成统一的 `checks` 数组，`status` 取值为 `pass`、`warn`、`fail`。只有存在 `fail` 时，`ready` 才会返回 `false`。当 Harbor 或 Prometheus 未配置时，接口会降级为静态数据并在 `warnings` 中提示，便于本地开发和依赖异常时继续展示基础发布状态。
 
+## 发布批次记录
+
+`/api/v1/cicd/apps/{name}/records` 会把一次发布固化为 `ReleaseRecord` 视图，核心字段包括：
+
+- Jenkins：`jenkins_job`、`jenkins_build`。
+- 镜像：`image`、`image_tag`、`image_digest`。
+- Argo CD：`argocd_app`、`argocd_revision`、`argocd_sync`、`argocd_health`。
+- 验证结果：`verification.ready`、`verification.checks`、`verification.metrics`、`verification.verified_at`。
+
+当前 v6 版本先提供只读发布记录模型：最新记录由实时 Argo CD、Harbor、Prometheus 聚合结果生成，历史记录来自内置发布历史。后续接入数据库或对象存储后，可以由 Jenkins 在发布完成后写入真实不可变记录，为灰度、回滚和审计提供数据基础。
+
 ## 本地运行
 
 ```bash
@@ -109,5 +123,8 @@ curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/metrics
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/release
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/health
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/verify
+curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records
+curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records/latest
+curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records/dev-cloudops-gateway-main-14
 curl http://127.0.0.1:8080/metrics
 ```
