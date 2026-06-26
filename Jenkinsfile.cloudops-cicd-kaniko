@@ -139,6 +139,12 @@ EOF
                         --build-arg VERSION="${IMAGE_TAG}" \
                         --build-arg COMMIT="${GIT_COMMIT_SHORT}" \
                         --build-arg BUILD_TIME="${BUILD_TIME}" \
+                        --build-arg HTTP_PROXY="${HTTP_PROXY}" \
+                        --build-arg HTTPS_PROXY="${HTTPS_PROXY}" \
+                        --build-arg NO_PROXY="${NO_PROXY}" \
+                        --build-arg http_proxy="${http_proxy}" \
+                        --build-arg https_proxy="${https_proxy}" \
+                        --build-arg no_proxy="${no_proxy}" \
                         --registry-certificate harbor-server.jianggan.cn=/kaniko/certs/jianggan-root-ca.crt
                     '''
                 }
