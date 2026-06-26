@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -23,18 +24,20 @@ var (
 type envelope map[string]any
 
 type AppSummary struct {
-	Name        string `json:"name"`
-	Env         string `json:"env"`
-	Namespace   string `json:"namespace"`
-	ArgoCDApp   string `json:"argocd_app"`
-	Image       string `json:"image"`
-	CurrentTag  string `json:"current_tag"`
-	Sync        string `json:"sync"`
-	Health      string `json:"health"`
-	LastRelease string `json:"last_release"`
-	Revision    string `json:"revision,omitempty"`
-	UpdatedAt   string `json:"updated_at,omitempty"`
-	Source      string `json:"source"`
+	Name             string `json:"name"`
+	Env              string `json:"env"`
+	Namespace        string `json:"namespace"`
+	ArgoCDApp        string `json:"argocd_app"`
+	HarborProject    string `json:"harbor_project"`
+	HarborRepository string `json:"harbor_repository"`
+	Image            string `json:"image"`
+	CurrentTag       string `json:"current_tag"`
+	Sync             string `json:"sync"`
+	Health           string `json:"health"`
+	LastRelease      string `json:"last_release"`
+	Revision         string `json:"revision,omitempty"`
+	UpdatedAt        string `json:"updated_at,omitempty"`
+	Source           string `json:"source"`
 }
 
 type ReleaseSummary struct {
@@ -46,40 +49,46 @@ type ReleaseSummary struct {
 
 var apps = []AppSummary{
 	{
-		Name:        "cloudops-gateway",
-		Env:         "dev",
-		Namespace:   "cloudops-dev",
-		ArgoCDApp:   "cloudops-gateway-dev",
-		Image:       "harbor-server.jianggan.cn/cloudops/cloudops-gateway:main-14",
-		CurrentTag:  "main-14",
-		Sync:        "Synced",
-		Health:      "Healthy",
-		LastRelease: "main-14",
-		Source:      "static",
+		Name:             "cloudops-gateway",
+		Env:              "dev",
+		Namespace:        "cloudops-dev",
+		ArgoCDApp:        "cloudops-gateway-dev",
+		HarborProject:    "cloudops",
+		HarborRepository: "cloudops-gateway",
+		Image:            "harbor-server.jianggan.cn/cloudops/cloudops-gateway:main-14",
+		CurrentTag:       "main-14",
+		Sync:             "Synced",
+		Health:           "Healthy",
+		LastRelease:      "main-14",
+		Source:           "static",
 	},
 	{
-		Name:        "cloudops-web",
-		Env:         "dev",
-		Namespace:   "cloudops-dev",
-		ArgoCDApp:   "cloudops-web-dev",
-		Image:       "harbor-server.jianggan.cn/cloudops/cloudops-web:main-8",
-		CurrentTag:  "main-8",
-		Sync:        "Synced",
-		Health:      "Healthy",
-		LastRelease: "main-8",
-		Source:      "static",
+		Name:             "cloudops-web",
+		Env:              "dev",
+		Namespace:        "cloudops-dev",
+		ArgoCDApp:        "cloudops-web-dev",
+		HarborProject:    "cloudops",
+		HarborRepository: "cloudops-web",
+		Image:            "harbor-server.jianggan.cn/cloudops/cloudops-web:main-8",
+		CurrentTag:       "main-8",
+		Sync:             "Synced",
+		Health:           "Healthy",
+		LastRelease:      "main-8",
+		Source:           "static",
 	},
 	{
-		Name:        "cloudops-cicd",
-		Env:         "dev",
-		Namespace:   "cloudops-dev",
-		ArgoCDApp:   "cloudops-cicd-dev",
-		Image:       "harbor-server.jianggan.cn/cloudops/cloudops-cicd:main-2",
-		CurrentTag:  "main-2",
-		Sync:        "Synced",
-		Health:      "Healthy",
-		LastRelease: "main-2",
-		Source:      "static",
+		Name:             "cloudops-cicd",
+		Env:              "dev",
+		Namespace:        "cloudops-dev",
+		ArgoCDApp:        "cloudops-cicd-dev",
+		HarborProject:    "cloudops",
+		HarborRepository: "cloudops-cicd",
+		Image:            "harbor-server.jianggan.cn/cloudops/cloudops-cicd:main-2",
+		CurrentTag:       "main-2",
+		Sync:             "Synced",
+		Health:           "Healthy",
+		LastRelease:      "main-2",
+		Source:           "static",
 	},
 }
 
@@ -116,6 +125,13 @@ type ArgoCDClient struct {
 	client *http.Client
 }
 
+type HarborClient struct {
+	server   string
+	username string
+	password string
+	client   *http.Client
+}
+
 type argoApplication struct {
 	Metadata struct {
 		Name string `json:"name"`
@@ -138,6 +154,22 @@ type argoApplication struct {
 		} `json:"summary"`
 		ReconciledAt string `json:"reconciledAt"`
 	} `json:"status"`
+}
+
+type ImageTagSummary struct {
+	Tag      string `json:"tag"`
+	Digest   string `json:"digest"`
+	PushedAt string `json:"pushed_at"`
+	Source   string `json:"source"`
+}
+
+type harborArtifact struct {
+	Digest   string `json:"digest"`
+	PushTime string `json:"push_time"`
+	Tags     []struct {
+		Name     string `json:"name"`
+		PushTime string `json:"push_time"`
+	} `json:"tags"`
 }
 
 func main() {
@@ -357,9 +389,122 @@ func appDetailHandler(w http.ResponseWriter, r *http.Request) {
 			"items": releases[app.Name],
 			"total": len(releases[app.Name]),
 		})
+	case "images":
+		items, source, err := loadImages(app)
+		payload := envelope{
+			"name":       app.Name,
+			"repository": app.HarborProject + "/" + app.HarborRepository,
+			"items":      items,
+			"total":      len(items),
+			"source":     source,
+		}
+		if err != nil {
+			payload["warning"] = err.Error()
+		}
+		writeJSON(w, http.StatusOK, payload)
 	default:
 		notFoundHandler(w, r)
 	}
+}
+
+func loadImages(app AppSummary) ([]ImageTagSummary, string, error) {
+	client, ok := newHarborClientFromEnv()
+	if !ok {
+		return staticImages(app), "static", nil
+	}
+
+	items, err := client.ListImageTags(app.HarborProject, app.HarborRepository)
+	if err != nil {
+		return staticImages(app), "static", fmt.Errorf("harbor query failed, fallback to static data: %w", err)
+	}
+	return items, "harbor", nil
+}
+
+func staticImages(app AppSummary) []ImageTagSummary {
+	items := make([]ImageTagSummary, 0, len(releases[app.Name]))
+	for _, release := range releases[app.Name] {
+		items = append(items, ImageTagSummary{
+			Tag:      release.Version,
+			Digest:   "",
+			PushedAt: release.BuildTime,
+			Source:   "static",
+		})
+	}
+	if len(items) == 0 && app.CurrentTag != "" {
+		items = append(items, ImageTagSummary{
+			Tag:    app.CurrentTag,
+			Source: "static",
+		})
+	}
+	return items
+}
+
+func newHarborClientFromEnv() (*HarborClient, bool) {
+	server := strings.TrimRight(env("HARBOR_SERVER", ""), "/")
+	username := strings.TrimSpace(os.Getenv("HARBOR_USERNAME"))
+	password := strings.TrimSpace(os.Getenv("HARBOR_PASSWORD"))
+	if server == "" || username == "" || password == "" {
+		return nil, false
+	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: envBool("HARBOR_INSECURE", true)} //nolint:gosec
+
+	return &HarborClient{
+		server:   server,
+		username: username,
+		password: password,
+		client: &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: transport,
+		},
+	}, true
+}
+
+func (c *HarborClient) ListImageTags(project string, repository string) ([]ImageTagSummary, error) {
+	project = url.PathEscape(project)
+	repository = url.PathEscape(repository)
+	apiURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?with_tag=true&page_size=20&sort=-push_time", c.server, project, repository)
+
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(c.username, c.password)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("harbor api status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	var artifacts []harborArtifact
+	if err := json.Unmarshal(body, &artifacts); err != nil {
+		return nil, err
+	}
+
+	items := make([]ImageTagSummary, 0)
+	for _, artifact := range artifacts {
+		for _, tag := range artifact.Tags {
+			pushedAt := firstNonEmpty(tag.PushTime, artifact.PushTime)
+			items = append(items, ImageTagSummary{
+				Tag:      tag.Name,
+				Digest:   artifact.Digest,
+				PushedAt: pushedAt,
+				Source:   "harbor",
+			})
+		}
+	}
+	return items, nil
 }
 
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
