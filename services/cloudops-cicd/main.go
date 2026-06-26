@@ -132,6 +132,11 @@ type HarborClient struct {
 	client   *http.Client
 }
 
+type PrometheusClient struct {
+	server string
+	client *http.Client
+}
+
 type argoApplication struct {
 	Metadata struct {
 		Name string `json:"name"`
@@ -170,6 +175,27 @@ type harborArtifact struct {
 		Name     string `json:"name"`
 		PushTime string `json:"push_time"`
 	} `json:"tags"`
+}
+
+type MetricsSummary struct {
+	Name    string  `json:"name"`
+	Source  string  `json:"source"`
+	Up      float64 `json:"up"`
+	Targets int     `json:"targets"`
+	Healthy bool    `json:"healthy"`
+	Message string  `json:"message,omitempty"`
+}
+
+type prometheusQueryResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		ResultType string `json:"resultType"`
+		Result     []struct {
+			Metric map[string]string `json:"metric"`
+			Value  []any             `json:"value"`
+		} `json:"result"`
+	} `json:"data"`
+	Error string `json:"error"`
 }
 
 func main() {
@@ -402,6 +428,18 @@ func appDetailHandler(w http.ResponseWriter, r *http.Request) {
 			payload["warning"] = err.Error()
 		}
 		writeJSON(w, http.StatusOK, payload)
+	case "metrics":
+		summary, err := loadMetrics(app)
+		if err != nil {
+			writeJSON(w, http.StatusOK, envelope{
+				"name":    app.Name,
+				"source":  "static",
+				"healthy": app.Health == "Healthy",
+				"message": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, summary)
 	default:
 		notFoundHandler(w, r)
 	}
@@ -505,6 +543,89 @@ func (c *HarborClient) ListImageTags(project string, repository string) ([]Image
 		}
 	}
 	return items, nil
+}
+
+func loadMetrics(app AppSummary) (MetricsSummary, error) {
+	client, ok := newPrometheusClientFromEnv()
+	if !ok {
+		return MetricsSummary{}, fmt.Errorf("prometheus server is not configured")
+	}
+
+	return client.QueryUp(app.Name)
+}
+
+func newPrometheusClientFromEnv() (*PrometheusClient, bool) {
+	server := strings.TrimRight(env("PROMETHEUS_SERVER", ""), "/")
+	if server == "" {
+		return nil, false
+	}
+
+	return &PrometheusClient{
+		server: server,
+		client: &http.Client{Timeout: 10 * time.Second},
+	}, true
+}
+
+func (c *PrometheusClient) QueryUp(job string) (MetricsSummary, error) {
+	query := fmt.Sprintf(`up{job=%q}`, job)
+	apiURL := c.server + "/api/v1/query?query=" + url.QueryEscape(query)
+
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return MetricsSummary{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return MetricsSummary{}, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return MetricsSummary{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return MetricsSummary{}, fmt.Errorf("prometheus api status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	var result prometheusQueryResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return MetricsSummary{}, err
+	}
+	if result.Status != "success" {
+		return MetricsSummary{}, fmt.Errorf("prometheus query failed: %s", result.Error)
+	}
+
+	var up float64
+	for _, item := range result.Data.Result {
+		if len(item.Value) < 2 {
+			continue
+		}
+		valueText, ok := item.Value[1].(string)
+		if !ok {
+			continue
+		}
+		value, err := strconv.ParseFloat(valueText, 64)
+		if err != nil {
+			continue
+		}
+		up += value
+	}
+
+	targets := len(result.Data.Result)
+	summary := MetricsSummary{
+		Name:    job,
+		Source:  "prometheus",
+		Up:      up,
+		Targets: targets,
+		Healthy: targets > 0 && int(up) == targets,
+	}
+	if targets == 0 {
+		summary.Message = "no prometheus targets matched up{job=\"" + job + "\"}"
+	}
+	return summary, nil
 }
 
 func metricsHandler(w http.ResponseWriter, r *http.Request) {

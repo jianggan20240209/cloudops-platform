@@ -10,7 +10,7 @@
 - Helm imageTag
 - 发布健康状态
 
-当前版本会优先从 Argo CD API 读取实时 Application 状态，并可从 Harbor API 查询镜像 tag 列表；如果没有配置对应凭据或调用失败，会回退到静态示例数据。后续再逐步接入 Jenkins API 和 Prometheus API。
+当前版本会优先从 Argo CD API 读取实时 Application 状态，可从 Harbor API 查询镜像 tag 列表，并可从 Prometheus API 查询基础运行指标；如果没有配置对应依赖或调用失败，会回退到静态示例数据。后续再逐步接入 Jenkins API。
 
 ## 本地目录
 
@@ -36,6 +36,7 @@ services/cloudops-cicd
 | `/api/v1/cicd/apps/{name}/status` | 应用当前发布状态 |
 | `/api/v1/cicd/apps/{name}/releases` | 应用发布历史 |
 | `/api/v1/cicd/apps/{name}/images` | 应用 Harbor 镜像 tag 列表 |
+| `/api/v1/cicd/apps/{name}/metrics` | 应用 Prometheus 基础运行指标 |
 | `/metrics` | Prometheus 指标 |
 
 ## 镜像名称
@@ -56,6 +57,7 @@ harbor-server.jianggan.cn/cloudops/cloudops-cicd:<tag>
 | `HARBOR_USERNAME` | 空 | Harbor 用户名或 Robot 账号 |
 | `HARBOR_PASSWORD` | 空 | Harbor 密码或 Robot Token |
 | `HARBOR_INSECURE` | `true` | 是否跳过 Harbor HTTPS 证书校验 |
+| `PROMETHEUS_SERVER` | 空 | Prometheus API 地址，例如 `http://kube-prometheus-stack-prometheus.monitoring.svc:9090` |
 
 未设置 `ARGOCD_SERVER` 或 `ARGOCD_AUTH_TOKEN` 时，接口会返回静态数据，并在响应中标记：
 
@@ -90,5 +92,6 @@ curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/status
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/releases
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/images
+curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/metrics
 curl http://127.0.0.1:8080/metrics
 ```
