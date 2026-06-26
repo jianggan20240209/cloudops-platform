@@ -186,6 +186,32 @@ type MetricsSummary struct {
 	Message string  `json:"message,omitempty"`
 }
 
+type CheckResult struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+type ReleaseDetail struct {
+	Name        string            `json:"name"`
+	Env         string            `json:"env"`
+	Namespace   string            `json:"namespace"`
+	ArgoCDApp   string            `json:"argocd_app"`
+	Image       string            `json:"image"`
+	CurrentTag  string            `json:"current_tag"`
+	Sync        string            `json:"sync"`
+	Health      string            `json:"health"`
+	Revision    string            `json:"revision,omitempty"`
+	UpdatedAt   string            `json:"updated_at,omitempty"`
+	Images      []ImageTagSummary `json:"images"`
+	Metrics     MetricsSummary    `json:"metrics"`
+	Checks      []CheckResult     `json:"checks"`
+	Ready       bool              `json:"ready"`
+	Source      string            `json:"source"`
+	Warnings    []string          `json:"warnings,omitempty"`
+	GeneratedAt string            `json:"generated_at"`
+}
+
 type prometheusQueryResponse struct {
 	Status string `json:"status"`
 	Data   struct {
@@ -440,9 +466,162 @@ func appDetailHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, summary)
+	case "release":
+		detail := buildReleaseDetail(app)
+		writeJSON(w, http.StatusOK, detail)
+	case "health":
+		detail := buildReleaseDetail(app)
+		writeJSON(w, http.StatusOK, envelope{
+			"name":         detail.Name,
+			"ready":        detail.Ready,
+			"sync":         detail.Sync,
+			"health":       detail.Health,
+			"metrics":      detail.Metrics,
+			"checks":       detail.Checks,
+			"warnings":     detail.Warnings,
+			"generated_at": detail.GeneratedAt,
+		})
+	case "verify":
+		detail := buildReleaseDetail(app)
+		writeJSON(w, http.StatusOK, envelope{
+			"name":         detail.Name,
+			"image":        detail.Image,
+			"tag":          detail.CurrentTag,
+			"ready":        detail.Ready,
+			"checks":       detail.Checks,
+			"warnings":     detail.Warnings,
+			"generated_at": detail.GeneratedAt,
+		})
 	default:
 		notFoundHandler(w, r)
 	}
+}
+
+func buildReleaseDetail(app AppSummary) ReleaseDetail {
+	warnings := make([]string, 0)
+
+	images, imageSource, err := loadImages(app)
+	if err != nil {
+		warnings = append(warnings, err.Error())
+	}
+
+	metrics, err := loadMetrics(app)
+	if err != nil {
+		metrics = MetricsSummary{
+			Name:    app.Name,
+			Source:  "static",
+			Healthy: app.Health == "Healthy",
+			Message: err.Error(),
+		}
+		warnings = append(warnings, err.Error())
+	}
+
+	checks := buildReleaseChecks(app, images, metrics)
+	ready := true
+	for _, check := range checks {
+		if check.Status == "fail" {
+			ready = false
+			break
+		}
+	}
+
+	return ReleaseDetail{
+		Name:        app.Name,
+		Env:         app.Env,
+		Namespace:   app.Namespace,
+		ArgoCDApp:   app.ArgoCDApp,
+		Image:       app.Image,
+		CurrentTag:  app.CurrentTag,
+		Sync:        app.Sync,
+		Health:      app.Health,
+		Revision:    app.Revision,
+		UpdatedAt:   app.UpdatedAt,
+		Images:      images,
+		Metrics:     metrics,
+		Checks:      checks,
+		Ready:       ready,
+		Source:      fmt.Sprintf("app:%s,images:%s,metrics:%s", app.Source, imageSource, metrics.Source),
+		Warnings:    warnings,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+func buildReleaseChecks(app AppSummary, images []ImageTagSummary, metrics MetricsSummary) []CheckResult {
+	checks := []CheckResult{
+		checkEqual("argocd_sync", app.Sync, "Synced", "Argo CD Application is synced"),
+		checkEqual("argocd_health", app.Health, "Healthy", "Argo CD Application is healthy"),
+		checkNotEmpty("image_tag", app.CurrentTag, "Current image tag is available"),
+	}
+
+	if len(images) > 0 && app.CurrentTag != "" {
+		if hasImageTag(images, app.CurrentTag) {
+			checks = append(checks, CheckResult{
+				Name:    "harbor_image",
+				Status:  "pass",
+				Message: "Current image tag exists in Harbor image list",
+			})
+		} else {
+			checks = append(checks, CheckResult{
+				Name:    "harbor_image",
+				Status:  "fail",
+				Message: "Current image tag was not found in Harbor image list",
+			})
+		}
+	}
+
+	switch {
+	case metrics.Source == "prometheus" && metrics.Healthy:
+		checks = append(checks, CheckResult{
+			Name:    "prometheus_up",
+			Status:  "pass",
+			Message: "All matched Prometheus up targets are healthy",
+		})
+	case metrics.Source == "prometheus":
+		message := metrics.Message
+		if message == "" {
+			message = "Prometheus up targets are not fully healthy"
+		}
+		checks = append(checks, CheckResult{
+			Name:    "prometheus_up",
+			Status:  "fail",
+			Message: message,
+		})
+	default:
+		checks = append(checks, CheckResult{
+			Name:    "prometheus_up",
+			Status:  "warn",
+			Message: firstNonEmpty(metrics.Message, "Prometheus metrics are unavailable, using application health only"),
+		})
+	}
+
+	return checks
+}
+
+func checkEqual(name string, got string, want string, passMessage string) CheckResult {
+	if got == want {
+		return CheckResult{Name: name, Status: "pass", Message: passMessage}
+	}
+	return CheckResult{
+		Name:    name,
+		Status:  "fail",
+		Message: fmt.Sprintf("expected %s, got %s", want, firstNonEmpty(got, "unknown")),
+	}
+}
+
+func checkNotEmpty(name string, value string, passMessage string) CheckResult {
+	if strings.TrimSpace(value) != "" {
+		return CheckResult{Name: name, Status: "pass", Message: passMessage}
+	}
+	return CheckResult{Name: name, Status: "fail", Message: "value is empty"}
+}
+
+func hasImageTag(images []ImageTagSummary, tag string) bool {
+	for _, image := range images {
+		if image.Tag == tag {
+			return true
+		}
+	}
+	return false
 }
 
 func loadImages(app AppSummary) ([]ImageTagSummary, string, error) {

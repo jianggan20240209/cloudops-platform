@@ -37,6 +37,9 @@ services/cloudops-cicd
 | `/api/v1/cicd/apps/{name}/releases` | 应用发布历史 |
 | `/api/v1/cicd/apps/{name}/images` | 应用 Harbor 镜像 tag 列表 |
 | `/api/v1/cicd/apps/{name}/metrics` | 应用 Prometheus 基础运行指标 |
+| `/api/v1/cicd/apps/{name}/release` | 聚合发布详情，合并 Argo CD、Harbor、Prometheus 数据 |
+| `/api/v1/cicd/apps/{name}/health` | 发布健康判断，只返回健康结论和检查项 |
+| `/api/v1/cicd/apps/{name}/verify` | 发布后验证结果，只返回镜像、tag、检查项和验证结论 |
 | `/metrics` | Prometheus 指标 |
 
 ## 镜像名称
@@ -75,6 +78,16 @@ harbor-server.jianggan.cn/cloudops/cloudops-cicd:<tag>
 }
 ```
 
+## 发布详情聚合
+
+`/api/v1/cicd/apps/{name}/release` 会聚合三类数据：
+
+- Argo CD：应用同步状态、健康状态、当前镜像、Git revision。
+- Harbor：镜像 tag 列表，并检查当前运行 tag 是否存在。
+- Prometheus：查询 `up{job="<app-name>"}`，判断服务监控目标是否全部存活。
+
+接口会生成统一的 `checks` 数组，`status` 取值为 `pass`、`warn`、`fail`。只有存在 `fail` 时，`ready` 才会返回 `false`。当 Harbor 或 Prometheus 未配置时，接口会降级为静态数据并在 `warnings` 中提示，便于本地开发和依赖异常时继续展示基础发布状态。
+
 ## 本地运行
 
 ```bash
@@ -93,5 +106,8 @@ curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/status
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/releases
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/images
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/metrics
+curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/release
+curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/health
+curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/verify
 curl http://127.0.0.1:8080/metrics
 ```
