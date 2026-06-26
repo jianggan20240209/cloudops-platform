@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -30,6 +32,9 @@ type AppSummary struct {
 	Sync        string `json:"sync"`
 	Health      string `json:"health"`
 	LastRelease string `json:"last_release"`
+	Revision    string `json:"revision,omitempty"`
+	UpdatedAt   string `json:"updated_at,omitempty"`
+	Source      string `json:"source"`
 }
 
 type ReleaseSummary struct {
@@ -50,6 +55,7 @@ var apps = []AppSummary{
 		Sync:        "Synced",
 		Health:      "Healthy",
 		LastRelease: "main-14",
+		Source:      "static",
 	},
 	{
 		Name:        "cloudops-web",
@@ -61,6 +67,19 @@ var apps = []AppSummary{
 		Sync:        "Synced",
 		Health:      "Healthy",
 		LastRelease: "main-8",
+		Source:      "static",
+	},
+	{
+		Name:        "cloudops-cicd",
+		Env:         "dev",
+		Namespace:   "cloudops-dev",
+		ArgoCDApp:   "cloudops-cicd-dev",
+		Image:       "harbor-server.jianggan.cn/cloudops/cloudops-cicd:main-2",
+		CurrentTag:  "main-2",
+		Sync:        "Synced",
+		Health:      "Healthy",
+		LastRelease: "main-2",
+		Source:      "static",
 	},
 }
 
@@ -81,6 +100,44 @@ var releases = map[string][]ReleaseSummary{
 			Status:    "Healthy",
 		},
 	},
+	"cloudops-cicd": {
+		{
+			Version:   "main-2",
+			Commit:    "unknown",
+			BuildTime: "2026-06-26T00:00:00Z",
+			Status:    "Healthy",
+		},
+	},
+}
+
+type ArgoCDClient struct {
+	server string
+	token  string
+	client *http.Client
+}
+
+type argoApplication struct {
+	Metadata struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Spec struct {
+		Destination struct {
+			Namespace string `json:"namespace"`
+		} `json:"destination"`
+	} `json:"spec"`
+	Status struct {
+		Sync struct {
+			Status   string `json:"status"`
+			Revision string `json:"revision"`
+		} `json:"sync"`
+		Health struct {
+			Status string `json:"status"`
+		} `json:"health"`
+		Summary struct {
+			Images []string `json:"images"`
+		} `json:"summary"`
+		ReconciledAt string `json:"reconciledAt"`
+	} `json:"status"`
 }
 
 func main() {
@@ -159,10 +216,100 @@ func appsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, envelope{
-		"items": apps,
-		"total": len(apps),
-	})
+	items, source, err := loadApps()
+	payload := envelope{
+		"items":  items,
+		"total":  len(items),
+		"source": source,
+	}
+	if err != nil {
+		payload["warning"] = err.Error()
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func loadApps() ([]AppSummary, string, error) {
+	client, ok := newArgoCDClientFromEnv()
+	if !ok {
+		return apps, "static", nil
+	}
+
+	items := make([]AppSummary, 0, len(apps))
+	for _, fallback := range apps {
+		app, err := client.GetApplication(fallback.ArgoCDApp)
+		if err != nil {
+			return apps, "static", fmt.Errorf("argocd query failed, fallback to static data: %w", err)
+		}
+		items = append(items, appFromArgo(fallback, app))
+	}
+	return items, "argocd", nil
+}
+
+func newArgoCDClientFromEnv() (*ArgoCDClient, bool) {
+	server := strings.TrimRight(env("ARGOCD_SERVER", ""), "/")
+	token := strings.TrimSpace(os.Getenv("ARGOCD_AUTH_TOKEN"))
+	if server == "" || token == "" {
+		return nil, false
+	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: envBool("ARGOCD_INSECURE", true)} //nolint:gosec
+
+	return &ArgoCDClient{
+		server: server,
+		token:  token,
+		client: &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: transport,
+		},
+	}, true
+}
+
+func (c *ArgoCDClient) GetApplication(name string) (argoApplication, error) {
+	var app argoApplication
+	req, err := http.NewRequest(http.MethodGet, c.server+"/api/v1/applications/"+name, nil)
+	if err != nil {
+		return app, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return app, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return app, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return app, fmt.Errorf("argocd api status=%d body=%s", resp.StatusCode, string(body))
+	}
+	if err := json.Unmarshal(body, &app); err != nil {
+		return app, err
+	}
+	return app, nil
+}
+
+func appFromArgo(fallback AppSummary, app argoApplication) AppSummary {
+	image := fallback.Image
+	if len(app.Status.Summary.Images) > 0 {
+		image = app.Status.Summary.Images[0]
+	}
+
+	summary := fallback
+	summary.Namespace = firstNonEmpty(app.Spec.Destination.Namespace, fallback.Namespace)
+	summary.Image = image
+	summary.CurrentTag = imageTag(image, fallback.CurrentTag)
+	summary.Sync = firstNonEmpty(app.Status.Sync.Status, fallback.Sync)
+	summary.Health = firstNonEmpty(app.Status.Health.Status, fallback.Health)
+	summary.LastRelease = summary.CurrentTag
+	summary.Revision = app.Status.Sync.Revision
+	summary.UpdatedAt = app.Status.ReconciledAt
+	summary.Source = "argocd"
+	return summary
 }
 
 func appDetailHandler(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +326,8 @@ func appDetailHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	parts := strings.Split(path, "/")
-	app, ok := findApp(parts[0])
+	items, _, _ := loadApps()
+	app, ok := findApp(items, parts[0])
 	if !ok {
 		writeJSON(w, http.StatusNotFound, envelope{
 			"error":   "app_not_found",
@@ -233,8 +381,8 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, "cloudops_cicd_managed_apps %d\n", len(apps))
 }
 
-func findApp(name string) (AppSummary, bool) {
-	for _, app := range apps {
+func findApp(items []AppSummary, name string) (AppSummary, bool) {
+	for _, app := range items {
 		if app.Name == name {
 			return app, true
 		}
@@ -279,6 +427,38 @@ func env(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func envBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	switch value {
+	case "":
+		return fallback
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func imageTag(image string, fallback string) string {
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	if lastColon > lastSlash {
+		return image[lastColon+1:]
+	}
+	return fallback
 }
 
 func label(value string) string {

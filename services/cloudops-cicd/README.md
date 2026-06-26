@@ -2,7 +2,7 @@
 
 `cloudops-cicd` 是 CloudOps AI 智能运维平台的 CI/CD 发布中心服务。
 
-第一版先提供静态 API，用于表达当前已经跑通的发布对象模型：
+第一版提供发布中心 API，用于表达当前已经跑通的发布对象模型：
 
 - Jenkins 构建
 - Harbor 镜像 tag
@@ -10,7 +10,7 @@
 - Helm imageTag
 - 发布健康状态
 
-后续再逐步接入真实的 Jenkins API、Argo CD API、Harbor API 和 Prometheus API。
+当前版本会优先从 Argo CD API 读取实时 Application 状态；如果没有配置 Argo CD token 或调用失败，会回退到静态示例数据。后续再逐步接入 Jenkins API、Harbor API 和 Prometheus API。
 
 ## 本地目录
 
@@ -41,6 +41,31 @@ services/cloudops-cicd
 
 ```text
 harbor-server.jianggan.cn/cloudops/cloudops-cicd:<tag>
+```
+
+## 环境变量
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `HTTP_ADDR` | `:8080` | HTTP 监听地址 |
+| `ARGOCD_SERVER` | 空 | Argo CD API 地址，例如 `https://argocd.jianggan.cn` |
+| `ARGOCD_AUTH_TOKEN` | 空 | Argo CD API Token |
+| `ARGOCD_INSECURE` | `true` | 是否跳过 Argo CD HTTPS 证书校验 |
+
+未设置 `ARGOCD_SERVER` 或 `ARGOCD_AUTH_TOKEN` 时，接口会返回静态数据，并在响应中标记：
+
+```json
+{
+  "source": "static"
+}
+```
+
+成功读取 Argo CD 时，响应中会标记：
+
+```json
+{
+  "source": "argocd"
+}
 ```
 
 ## 本地运行
