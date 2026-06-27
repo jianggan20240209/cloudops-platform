@@ -86,6 +86,20 @@ var apps = []AppSummary{
 		Source:           "static",
 	},
 	{
+		Name:             "cloudops-gateway-rollout",
+		Env:              "dev",
+		Namespace:        "cloudops-dev",
+		ArgoCDApp:        "cloudops-gateway-rollout-dev",
+		HarborProject:    "cloudops",
+		HarborRepository: "cloudops-gateway",
+		Image:            "harbor-server.jianggan.cn/cloudops/cloudops-gateway:main-14",
+		CurrentTag:       "main-14",
+		Sync:             "Synced",
+		Health:           "Healthy",
+		LastRelease:      "main-14",
+		Source:           "static",
+	},
+	{
 		Name:             "cloudops-cicd",
 		Env:              "dev",
 		Namespace:        "cloudops-dev",
@@ -493,12 +507,20 @@ func loadApps() ([]AppSummary, string, error) {
 	}
 
 	items := make([]AppSummary, 0, len(apps))
+	warnings := make([]string, 0)
 	for _, fallback := range apps {
 		app, err := client.GetApplication(fallback.ArgoCDApp)
 		if err != nil {
-			return apps, "static", fmt.Errorf("argocd query failed, fallback to static data: %w", err)
+			staticApp := fallback
+			staticApp.Source = "static"
+			items = append(items, staticApp)
+			warnings = append(warnings, fmt.Sprintf("%s: %v", fallback.ArgoCDApp, err))
+			continue
 		}
 		items = append(items, appFromArgo(fallback, app))
+	}
+	if len(warnings) > 0 {
+		return items, "argocd-partial", fmt.Errorf("argocd query partially failed: %s", strings.Join(warnings, "; "))
 	}
 	return items, "argocd", nil
 }

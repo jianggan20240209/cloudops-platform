@@ -153,6 +153,8 @@ curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records/latest
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records/dev-cloudops-gateway-main-14
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/rollback-candidates
+curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway-rollout/release
+curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway-rollout/rollout
 curl http://127.0.0.1:8080/api/v1/cicd/apps/rollouts-demo-istio/rollout
 curl http://127.0.0.1:8080/api/v1/cicd/apps/rollouts-demo-istio/analysisruns
 curl -X POST http://127.0.0.1:8080/api/v1/cicd/releases/records \
