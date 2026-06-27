@@ -45,6 +45,8 @@ services/cloudops-cicd
 | `/api/v1/cicd/apps/{name}/records/{id}` | 指定发布批次记录 |
 | `POST /api/v1/cicd/releases/records` | 写入发布批次记录 |
 | `/api/v1/cicd/apps/{name}/rollback-candidates` | 查询可回滚候选版本 |
+| `/api/v1/cicd/apps/{name}/rollout` | 查询应用对应 Argo Rollout 状态 |
+| `/api/v1/cicd/apps/{name}/analysisruns` | 查询应用对应 AnalysisRun 列表 |
 | `/metrics` | Prometheus 指标 |
 
 ## 镜像名称
@@ -69,6 +71,7 @@ harbor-server.jianggan.cn/cloudops/cloudops-cicd:<tag>
 | `RELEASE_RECORD_DATABASE_URL` | 空 | PostgreSQL DSN，未配置时使用内存存储 |
 | `POSTGRES_DSN` | 空 | PostgreSQL DSN 兼容变量，优先级低于 `RELEASE_RECORD_DATABASE_URL` |
 | `RELEASE_RECORD_WRITE_TOKEN` | 空 | 发布记录写入 token；为空时不校验写入 token |
+| `KUBERNETES_API_SERVER` | 空 | Kubernetes API 地址；为空时自动使用 Pod 内 `KUBERNETES_SERVICE_HOST` |
 
 未设置 `ARGOCD_SERVER` 或 `ARGOCD_AUTH_TOKEN` 时，接口会返回静态数据，并在响应中标记：
 
@@ -116,6 +119,15 @@ GitOps Helm chart 已支持为 `cloudops-cicd` 启用内置 PostgreSQL StatefulS
 
 Jenkins 可以在镜像构建、Argo CD 同步、健康检查完成后写入一条真实发布记录。回滚候选接口会从发布记录中筛选 `status=succeeded` 且 `verification.ready=true` 的历史版本，并排除当前运行 tag。
 
+## Rollout 状态
+
+服务运行在 Kubernetes 内时，会通过 ServiceAccount token 读取同命名空间的 `Rollout` 和 `AnalysisRun` 资源。Helm chart 会为 `cloudops-cicd` 创建最小 RBAC：
+
+- `argoproj.io/rollouts`: `get/list/watch`
+- `argoproj.io/analysisruns`: `get/list/watch`
+
+`/release` 和 `/records` 会在应用存在同名 Rollout 时附带 `rollout` 摘要，并将 Rollout 健康状态加入检查项。
+
 ## 本地运行
 
 ```bash
@@ -141,6 +153,8 @@ curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records/latest
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records/dev-cloudops-gateway-main-14
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/rollback-candidates
+curl http://127.0.0.1:8080/api/v1/cicd/apps/rollouts-demo-istio/rollout
+curl http://127.0.0.1:8080/api/v1/cicd/apps/rollouts-demo-istio/analysisruns
 curl -X POST http://127.0.0.1:8080/api/v1/cicd/releases/records \
   -H 'Content-Type: application/json' \
   --data '{"app_name":"cloudops-gateway","env":"dev","namespace":"cloudops-dev","image":"harbor-server.jianggan.cn/cloudops/cloudops-gateway:main-15","image_tag":"main-15","argocd_app":"cloudops-gateway-dev","argocd_sync":"Synced","argocd_health":"Healthy","status":"succeeded","verification":{"ready":true}}'

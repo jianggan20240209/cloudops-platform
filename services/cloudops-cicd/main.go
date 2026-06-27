@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -98,6 +99,34 @@ var apps = []AppSummary{
 		LastRelease:      "main-2",
 		Source:           "static",
 	},
+	{
+		Name:             "rollouts-demo",
+		Env:              "dev",
+		Namespace:        "cloudops-dev",
+		ArgoCDApp:        "rollouts-demo-dev",
+		HarborProject:    "cloudops",
+		HarborRepository: "cloudops-gateway",
+		Image:            "harbor-server.jianggan.cn/cloudops/cloudops-gateway:main-14",
+		CurrentTag:       "main-14",
+		Sync:             "Synced",
+		Health:           "Healthy",
+		LastRelease:      "main-14",
+		Source:           "static",
+	},
+	{
+		Name:             "rollouts-demo-istio",
+		Env:              "dev",
+		Namespace:        "cloudops-dev",
+		ArgoCDApp:        "rollouts-demo-istio-dev",
+		HarborProject:    "cloudops",
+		HarborRepository: "cloudops-gateway",
+		Image:            "harbor-server.jianggan.cn/cloudops/cloudops-gateway:main-14",
+		CurrentTag:       "main-14",
+		Sync:             "Synced",
+		Health:           "Healthy",
+		LastRelease:      "main-14",
+		Source:           "static",
+	},
 }
 
 var releases = map[string][]ReleaseSummary{
@@ -142,6 +171,12 @@ type HarborClient struct {
 
 type PrometheusClient struct {
 	server string
+	client *http.Client
+}
+
+type KubernetesClient struct {
+	server string
+	token  string
 	client *http.Client
 }
 
@@ -213,6 +248,7 @@ type ReleaseDetail struct {
 	UpdatedAt   string            `json:"updated_at,omitempty"`
 	Images      []ImageTagSummary `json:"images"`
 	Metrics     MetricsSummary    `json:"metrics"`
+	Rollout     *RolloutSummary   `json:"rollout,omitempty"`
 	Checks      []CheckResult     `json:"checks"`
 	Ready       bool              `json:"ready"`
 	Source      string            `json:"source"`
@@ -221,11 +257,12 @@ type ReleaseDetail struct {
 }
 
 type ReleaseVerification struct {
-	Ready      bool           `json:"ready"`
-	Checks     []CheckResult  `json:"checks"`
-	Metrics    MetricsSummary `json:"metrics"`
-	Warnings   []string       `json:"warnings,omitempty"`
-	VerifiedAt string         `json:"verified_at"`
+	Ready      bool            `json:"ready"`
+	Checks     []CheckResult   `json:"checks"`
+	Metrics    MetricsSummary  `json:"metrics"`
+	Rollout    *RolloutSummary `json:"rollout,omitempty"`
+	Warnings   []string        `json:"warnings,omitempty"`
+	VerifiedAt string          `json:"verified_at"`
 }
 
 type ReleaseRecord struct {
@@ -262,6 +299,89 @@ type MemoryReleaseRecordStore struct {
 
 type PostgresReleaseRecordStore struct {
 	db *sql.DB
+}
+
+type RolloutSummary struct {
+	Name              string               `json:"name"`
+	Namespace         string               `json:"namespace"`
+	Phase             string               `json:"phase,omitempty"`
+	CurrentStepIndex  int                  `json:"current_step_index,omitempty"`
+	CurrentPodHash    string               `json:"current_pod_hash,omitempty"`
+	StableRS          string               `json:"stable_rs,omitempty"`
+	Replicas          int                  `json:"replicas"`
+	UpdatedReplicas   int                  `json:"updated_replicas"`
+	AvailableReplicas int                  `json:"available_replicas"`
+	Conditions        []RolloutCondition   `json:"conditions,omitempty"`
+	AnalysisRuns      []AnalysisRunSummary `json:"analysis_runs,omitempty"`
+	Healthy           bool                 `json:"healthy"`
+	Source            string               `json:"source"`
+}
+
+type RolloutCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type AnalysisRunSummary struct {
+	Name      string                  `json:"name"`
+	Namespace string                  `json:"namespace"`
+	Phase     string                  `json:"phase,omitempty"`
+	Message   string                  `json:"message,omitempty"`
+	StartedAt string                  `json:"started_at,omitempty"`
+	Metric    []AnalysisMetricSummary `json:"metrics,omitempty"`
+}
+
+type AnalysisMetricSummary struct {
+	Name    string `json:"name"`
+	Phase   string `json:"phase,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type k8sRollout struct {
+	Metadata struct {
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	} `json:"metadata"`
+	Status struct {
+		Phase             string `json:"phase"`
+		CurrentStepIndex  int    `json:"currentStepIndex"`
+		CurrentPodHash    string `json:"currentPodHash"`
+		StableRS          string `json:"stableRS"`
+		Replicas          int    `json:"replicas"`
+		UpdatedReplicas   int    `json:"updatedReplicas"`
+		AvailableReplicas int    `json:"availableReplicas"`
+		Conditions        []struct {
+			Type    string `json:"type"`
+			Status  string `json:"status"`
+			Reason  string `json:"reason"`
+			Message string `json:"message"`
+		} `json:"conditions"`
+	} `json:"status"`
+}
+
+type k8sAnalysisRunList struct {
+	Items []k8sAnalysisRun `json:"items"`
+}
+
+type k8sAnalysisRun struct {
+	Metadata struct {
+		Name              string            `json:"name"`
+		Namespace         string            `json:"namespace"`
+		CreationTimestamp string            `json:"creationTimestamp"`
+		Labels            map[string]string `json:"labels"`
+	} `json:"metadata"`
+	Status struct {
+		Phase         string `json:"phase"`
+		Message       string `json:"message"`
+		StartedAt     string `json:"startedAt"`
+		MetricResults []struct {
+			Name    string `json:"name"`
+			Phase   string `json:"phase"`
+			Message string `json:"message"`
+		} `json:"metricResults"`
+	} `json:"status"`
 }
 
 type prometheusQueryResponse struct {
@@ -598,6 +718,49 @@ func appDetailHandler(w http.ResponseWriter, r *http.Request) {
 			"total":       len(candidates),
 			"source":      recordStore.Source(),
 		})
+	case "rollout":
+		if len(parts) != 2 {
+			notFoundHandler(w, r)
+			return
+		}
+		rollout, ok, err := loadRolloutSummary(r.Context(), app)
+		if err != nil {
+			writeJSON(w, http.StatusOK, envelope{
+				"name":    app.Name,
+				"source":  "kubernetes",
+				"warning": err.Error(),
+			})
+			return
+		}
+		if !ok {
+			writeJSON(w, http.StatusNotFound, envelope{
+				"error":   "rollout_not_found",
+				"message": "rollout resource not found for app",
+				"name":    app.Name,
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, rollout)
+	case "analysisruns":
+		if len(parts) != 2 {
+			notFoundHandler(w, r)
+			return
+		}
+		items, err := loadAnalysisRuns(r.Context(), app)
+		if err != nil {
+			writeJSON(w, http.StatusOK, envelope{
+				"name":    app.Name,
+				"source":  "kubernetes",
+				"warning": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope{
+			"name":   app.Name,
+			"items":  items,
+			"total":  len(items),
+			"source": "kubernetes",
+		})
 	default:
 		notFoundHandler(w, r)
 	}
@@ -661,7 +824,15 @@ func buildReleaseDetail(app AppSummary) ReleaseDetail {
 		warnings = append(warnings, err.Error())
 	}
 
-	checks := buildReleaseChecks(app, images, metrics)
+	var rollout *RolloutSummary
+	rolloutSummary, ok, err := loadRolloutSummary(context.Background(), app)
+	if err != nil {
+		warnings = append(warnings, err.Error())
+	} else if ok {
+		rollout = &rolloutSummary
+	}
+
+	checks := buildReleaseChecks(app, images, metrics, rollout)
 	ready := true
 	for _, check := range checks {
 		if check.Status == "fail" {
@@ -683,6 +854,7 @@ func buildReleaseDetail(app AppSummary) ReleaseDetail {
 		UpdatedAt:   app.UpdatedAt,
 		Images:      images,
 		Metrics:     metrics,
+		Rollout:     rollout,
 		Checks:      checks,
 		Ready:       ready,
 		Source:      fmt.Sprintf("app:%s,images:%s,metrics:%s", app.Source, imageSource, metrics.Source),
@@ -984,6 +1156,7 @@ func releaseRecordFromDetail(app AppSummary, detail ReleaseDetail) ReleaseRecord
 			Ready:      detail.Ready,
 			Checks:     detail.Checks,
 			Metrics:    detail.Metrics,
+			Rollout:    detail.Rollout,
 			Warnings:   detail.Warnings,
 			VerifiedAt: detail.GeneratedAt,
 		},
@@ -1042,7 +1215,7 @@ func imageByTag(images []ImageTagSummary, tag string) ImageTagSummary {
 	return ImageTagSummary{}
 }
 
-func buildReleaseChecks(app AppSummary, images []ImageTagSummary, metrics MetricsSummary) []CheckResult {
+func buildReleaseChecks(app AppSummary, images []ImageTagSummary, metrics MetricsSummary, rollout *RolloutSummary) []CheckResult {
 	checks := []CheckResult{
 		checkEqual("argocd_sync", app.Sync, "Synced", "Argo CD Application is synced"),
 		checkEqual("argocd_health", app.Health, "Healthy", "Argo CD Application is healthy"),
@@ -1088,6 +1261,22 @@ func buildReleaseChecks(app AppSummary, images []ImageTagSummary, metrics Metric
 			Status:  "warn",
 			Message: firstNonEmpty(metrics.Message, "Prometheus metrics are unavailable, using application health only"),
 		})
+	}
+
+	if rollout != nil {
+		if rollout.Healthy {
+			checks = append(checks, CheckResult{
+				Name:    "rollout_health",
+				Status:  "pass",
+				Message: "Argo Rollout is healthy",
+			})
+		} else {
+			checks = append(checks, CheckResult{
+				Name:    "rollout_health",
+				Status:  "fail",
+				Message: "Argo Rollout is not healthy",
+			})
+		}
 	}
 
 	return checks
@@ -1239,6 +1428,172 @@ func newPrometheusClientFromEnv() (*PrometheusClient, bool) {
 		server: server,
 		client: &http.Client{Timeout: 10 * time.Second},
 	}, true
+}
+
+func newKubernetesClientFromEnv() (*KubernetesClient, bool, error) {
+	host := strings.TrimSpace(os.Getenv("KUBERNETES_SERVICE_HOST"))
+	port := firstNonEmpty(os.Getenv("KUBERNETES_SERVICE_PORT"), "443")
+	server := strings.TrimRight(os.Getenv("KUBERNETES_API_SERVER"), "/")
+	if server == "" && host != "" {
+		server = "https://" + host + ":" + port
+	}
+	if server == "" {
+		return nil, false, nil
+	}
+
+	tokenBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
+	if err != nil {
+		return nil, false, fmt.Errorf("read kubernetes service account token: %w", err)
+	}
+	caBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+	if err != nil {
+		return nil, false, fmt.Errorf("read kubernetes service account ca: %w", err)
+	}
+
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caBytes) {
+		return nil, false, fmt.Errorf("load kubernetes service account ca")
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{RootCAs: roots}
+
+	return &KubernetesClient{
+		server: server,
+		token:  strings.TrimSpace(string(tokenBytes)),
+		client: &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: transport,
+		},
+	}, true, nil
+}
+
+func (c *KubernetesClient) GetJSON(ctx context.Context, apiPath string, out any) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.server+apiPath, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp.StatusCode, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return resp.StatusCode, fmt.Errorf("kubernetes api status=%d body=%s", resp.StatusCode, string(body))
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return resp.StatusCode, err
+	}
+	return resp.StatusCode, nil
+}
+
+func loadRolloutSummary(ctx context.Context, app AppSummary) (RolloutSummary, bool, error) {
+	client, ok, err := newKubernetesClientFromEnv()
+	if err != nil || !ok {
+		return RolloutSummary{}, false, err
+	}
+
+	var rollout k8sRollout
+	apiPath := fmt.Sprintf("/apis/argoproj.io/v1alpha1/namespaces/%s/rollouts/%s", url.PathEscape(app.Namespace), url.PathEscape(app.Name))
+	status, err := client.GetJSON(ctx, apiPath, &rollout)
+	if err != nil {
+		if status == http.StatusNotFound {
+			return RolloutSummary{}, false, nil
+		}
+		return RolloutSummary{}, false, err
+	}
+
+	analysisRuns, err := loadAnalysisRunsWithClient(ctx, client, app)
+	if err != nil {
+		log.Printf("failed to list analysisruns app=%s: %v", app.Name, err)
+	}
+	return rolloutFromKubernetes(rollout, analysisRuns), true, nil
+}
+
+func loadAnalysisRuns(ctx context.Context, app AppSummary) ([]AnalysisRunSummary, error) {
+	client, ok, err := newKubernetesClientFromEnv()
+	if err != nil || !ok {
+		return nil, err
+	}
+	return loadAnalysisRunsWithClient(ctx, client, app)
+}
+
+func loadAnalysisRunsWithClient(ctx context.Context, client *KubernetesClient, app AppSummary) ([]AnalysisRunSummary, error) {
+	var list k8sAnalysisRunList
+	apiPath := fmt.Sprintf("/apis/argoproj.io/v1alpha1/namespaces/%s/analysisruns", url.PathEscape(app.Namespace))
+	if _, err := client.GetJSON(ctx, apiPath, &list); err != nil {
+		return nil, err
+	}
+
+	items := make([]AnalysisRunSummary, 0)
+	prefix := app.Name + "-"
+	for _, item := range list.Items {
+		if !strings.HasPrefix(item.Metadata.Name, prefix) {
+			continue
+		}
+		items = append(items, analysisRunFromKubernetes(item))
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].StartedAt > items[j].StartedAt
+	})
+	return items, nil
+}
+
+func rolloutFromKubernetes(rollout k8sRollout, analysisRuns []AnalysisRunSummary) RolloutSummary {
+	conditions := make([]RolloutCondition, 0, len(rollout.Status.Conditions))
+	healthy := rollout.Status.Phase == "Healthy"
+	for _, condition := range rollout.Status.Conditions {
+		conditions = append(conditions, RolloutCondition{
+			Type:    condition.Type,
+			Status:  condition.Status,
+			Reason:  condition.Reason,
+			Message: condition.Message,
+		})
+		if condition.Type == "Healthy" && condition.Status == "True" {
+			healthy = true
+		}
+	}
+	return RolloutSummary{
+		Name:              rollout.Metadata.Name,
+		Namespace:         rollout.Metadata.Namespace,
+		Phase:             rollout.Status.Phase,
+		CurrentStepIndex:  rollout.Status.CurrentStepIndex,
+		CurrentPodHash:    rollout.Status.CurrentPodHash,
+		StableRS:          rollout.Status.StableRS,
+		Replicas:          rollout.Status.Replicas,
+		UpdatedReplicas:   rollout.Status.UpdatedReplicas,
+		AvailableReplicas: rollout.Status.AvailableReplicas,
+		Conditions:        conditions,
+		AnalysisRuns:      analysisRuns,
+		Healthy:           healthy,
+		Source:            "kubernetes",
+	}
+}
+
+func analysisRunFromKubernetes(item k8sAnalysisRun) AnalysisRunSummary {
+	metrics := make([]AnalysisMetricSummary, 0, len(item.Status.MetricResults))
+	for _, metric := range item.Status.MetricResults {
+		metrics = append(metrics, AnalysisMetricSummary{
+			Name:    metric.Name,
+			Phase:   metric.Phase,
+			Message: metric.Message,
+		})
+	}
+	return AnalysisRunSummary{
+		Name:      item.Metadata.Name,
+		Namespace: item.Metadata.Namespace,
+		Phase:     item.Status.Phase,
+		Message:   item.Status.Message,
+		StartedAt: firstNonEmpty(item.Status.StartedAt, item.Metadata.CreationTimestamp),
+		Metric:    metrics,
+	}
 }
 
 func (c *PrometheusClient) QueryUp(job string) (MetricsSummary, error) {
