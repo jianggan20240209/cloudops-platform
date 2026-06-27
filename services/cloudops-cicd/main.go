@@ -1415,7 +1415,14 @@ func loadMetrics(app AppSummary) (MetricsSummary, error) {
 		return MetricsSummary{}, fmt.Errorf("prometheus server is not configured")
 	}
 
-	return client.QueryUp(app.Name)
+	summary, err := client.QueryUp(app.Name)
+	if err != nil {
+		return MetricsSummary{}, err
+	}
+	if summary.Targets > 0 {
+		return summary, nil
+	}
+	return client.QueryServiceUp(app.Namespace, app.Name)
 }
 
 func newPrometheusClientFromEnv() (*PrometheusClient, bool) {
@@ -1598,6 +1605,20 @@ func analysisRunFromKubernetes(item k8sAnalysisRun) AnalysisRunSummary {
 
 func (c *PrometheusClient) QueryUp(job string) (MetricsSummary, error) {
 	query := fmt.Sprintf(`up{job=%q}`, job)
+	return c.queryUp(job, query, "no prometheus targets matched up{job=\""+job+"\"}")
+}
+
+func (c *PrometheusClient) QueryServiceUp(namespace string, service string) (MetricsSummary, error) {
+	query := serviceUpQuery(namespace, service)
+	message := fmt.Sprintf("no prometheus targets matched service %q or stable/canary services in namespace %q", service, namespace)
+	return c.queryUp(service, query, message)
+}
+
+func serviceUpQuery(namespace string, service string) string {
+	return fmt.Sprintf(`up{namespace=%q,service=%q} or up{namespace=%q,service=~%q}`, namespace, service, namespace, service+"-(stable|canary)")
+}
+
+func (c *PrometheusClient) queryUp(name string, query string, noTargetsMessage string) (MetricsSummary, error) {
 	apiURL := c.server + "/api/v1/query?query=" + url.QueryEscape(query)
 
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
@@ -1646,14 +1667,14 @@ func (c *PrometheusClient) QueryUp(job string) (MetricsSummary, error) {
 
 	targets := len(result.Data.Result)
 	summary := MetricsSummary{
-		Name:    job,
+		Name:    name,
 		Source:  "prometheus",
 		Up:      up,
 		Targets: targets,
 		Healthy: targets > 0 && int(up) == targets,
 	}
 	if targets == 0 {
-		summary.Message = "no prometheus targets matched up{job=\"" + job + "\"}"
+		summary.Message = noTargetsMessage
 	}
 	return summary, nil
 }

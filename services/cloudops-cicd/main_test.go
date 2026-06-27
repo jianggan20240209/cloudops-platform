@@ -104,3 +104,11 @@ func TestRollbackCandidates(t *testing.T) {
 		t.Fatalf("candidate tag = %q", candidates[0].ImageTag)
 	}
 }
+
+func TestServiceUpQuery(t *testing.T) {
+	got := serviceUpQuery("cloudops-dev", "rollouts-demo-istio")
+	want := `up{namespace="cloudops-dev",service="rollouts-demo-istio"} or up{namespace="cloudops-dev",service=~"rollouts-demo-istio-(stable|canary)"}`
+	if got != want {
+		t.Fatalf("serviceUpQuery() = %q, want %q", got, want)
+	}
+}

@@ -95,7 +95,7 @@ harbor-server.jianggan.cn/cloudops/cloudops-cicd:<tag>
 
 - Argo CD：应用同步状态、健康状态、当前镜像、Git revision。
 - Harbor：镜像 tag 列表，并检查当前运行 tag 是否存在。
-- Prometheus：查询 `up{job="<app-name>"}`，判断服务监控目标是否全部存活。
+- Prometheus：优先查询 `up{job="<app-name>"}`；无 target 时回退查询同命名空间下 `service="<app-name>"` 和 `service=~"<app-name>-(stable|canary)"`，判断服务监控目标是否全部存活。
 
 接口会生成统一的 `checks` 数组，`status` 取值为 `pass`、`warn`、`fail`。只有存在 `fail` 时，`ready` 才会返回 `false`。当 Harbor 或 Prometheus 未配置时，接口会降级为静态数据并在 `warnings` 中提示，便于本地开发和依赖异常时继续展示基础发布状态。
 
