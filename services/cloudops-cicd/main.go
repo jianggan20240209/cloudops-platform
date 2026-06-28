@@ -593,7 +593,7 @@ func appFromArgo(fallback AppSummary, app argoApplication) AppSummary {
 }
 
 func appDetailHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		methodNotAllowed(w)
 		return
 	}
@@ -618,7 +618,20 @@ func appDetailHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
 		writeJSON(w, http.StatusOK, app)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		if len(parts) == 3 && parts[1] == "records" && parts[2] == "snapshot" {
+			saveReleaseSnapshotHandler(w, r, app)
+			return
+		}
+		methodNotAllowed(w)
 		return
 	}
 
@@ -827,6 +840,28 @@ func releaseRecordsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, record)
 }
 
+func saveReleaseSnapshotHandler(w http.ResponseWriter, r *http.Request, app AppSummary) {
+	if !authorizedReleaseRecordWrite(r) {
+		writeJSON(w, http.StatusUnauthorized, envelope{
+			"error":   "unauthorized",
+			"message": "release record write token is invalid",
+		})
+		return
+	}
+
+	record := buildReleaseSnapshot(app)
+	record, err := recordStore.Save(r.Context(), record)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, envelope{
+			"error":   "release_record_save_failed",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, record)
+}
+
 func buildReleaseDetail(app AppSummary) ReleaseDetail {
 	warnings := make([]string, 0)
 
@@ -883,6 +918,14 @@ func buildReleaseDetail(app AppSummary) ReleaseDetail {
 		Warnings:    warnings,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 	}
+}
+
+func buildReleaseSnapshot(app AppSummary) ReleaseRecord {
+	detail := buildReleaseDetail(app)
+	record := releaseRecordFromDetail(app, detail)
+	record.ID = releaseRecordSnapshotID(record.Env, record.AppName, record.ImageTag, record.CreatedAt)
+	record.Source = "snapshot"
+	return record
 }
 
 func buildReleaseRecords(app AppSummary) []ReleaseRecord {
@@ -1891,6 +1934,14 @@ func releaseRecordID(envName string, appName string, tag string) string {
 		firstNonEmpty(appName, "unknown"),
 		firstNonEmpty(tag, "unknown"),
 	}, "-")
+}
+
+func releaseRecordSnapshotID(envName string, appName string, tag string, timestamp string) string {
+	suffix := strings.NewReplacer("-", "", ":", "", "T", "", "Z", "", ".", "").Replace(firstNonEmpty(timestamp, time.Now().UTC().Format(time.RFC3339)))
+	if len(suffix) > 14 {
+		suffix = suffix[:14]
+	}
+	return releaseRecordID(envName, appName, tag) + "-snapshot-" + suffix
 }
 
 func jenkinsJobName(appName string) string {

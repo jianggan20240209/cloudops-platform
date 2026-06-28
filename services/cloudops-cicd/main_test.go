@@ -112,3 +112,35 @@ func TestServiceUpQuery(t *testing.T) {
 		t.Fatalf("serviceUpQuery() = %q, want %q", got, want)
 	}
 }
+
+func TestReleaseRecordSnapshotID(t *testing.T) {
+	got := releaseRecordSnapshotID("dev", "cloudops-gateway-rollout", "main-14", "2026-06-28T01:23:45Z")
+	want := "dev-cloudops-gateway-rollout-main-14-snapshot-20260628012345"
+	if got != want {
+		t.Fatalf("releaseRecordSnapshotID() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildReleaseSnapshotStoresNotReady(t *testing.T) {
+	app := AppSummary{
+		Name:       "unit-test-app",
+		Env:        "dev",
+		Namespace:  "cloudops-dev",
+		Image:      "harbor-server.jianggan.cn/cloudops/unit-test-app:main-1",
+		CurrentTag: "main-1",
+		Sync:       "OutOfSync",
+		Health:     "Degraded",
+		Source:     "static",
+	}
+
+	record := buildReleaseSnapshot(app)
+	if record.Source != "snapshot" {
+		t.Fatalf("record.Source = %q, want snapshot", record.Source)
+	}
+	if record.Status != "failed" {
+		t.Fatalf("record.Status = %q, want failed", record.Status)
+	}
+	if record.ID == releaseRecordID(app.Env, app.Name, app.CurrentTag) {
+		t.Fatalf("snapshot record ID should not overwrite base release record ID")
+	}
+}

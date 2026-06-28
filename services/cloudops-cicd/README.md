@@ -43,6 +43,7 @@ services/cloudops-cicd
 | `/api/v1/cicd/apps/{name}/records` | 发布批次记录列表 |
 | `/api/v1/cicd/apps/{name}/records/latest` | 最新发布批次记录 |
 | `/api/v1/cicd/apps/{name}/records/{id}` | 指定发布批次记录 |
+| `POST /api/v1/cicd/apps/{name}/records/snapshot` | 保存当前应用聚合结果为发布记录快照 |
 | `POST /api/v1/cicd/releases/records` | 写入发布批次记录 |
 | `/api/v1/cicd/apps/{name}/rollback-candidates` | 查询可回滚候选版本 |
 | `/api/v1/cicd/apps/{name}/rollout` | 查询应用对应 Argo Rollout 状态 |
@@ -119,6 +120,8 @@ GitOps Helm chart 已支持为 `cloudops-cicd` 启用内置 PostgreSQL StatefulS
 
 Jenkins 可以在镜像构建、Argo CD 同步、健康检查完成后写入一条真实发布记录。回滚候选接口会从发布记录中筛选 `status=succeeded` 且 `verification.ready=true` 的历史版本，并排除当前运行 tag。
 
+`POST /api/v1/cicd/apps/{name}/records/snapshot` 会读取当前应用的 Argo CD、Harbor、Prometheus、Rollout 和 AnalysisRun 聚合结果，生成带时间戳的快照记录并写入 Release Record 存储。快照不会覆盖同一个 imageTag 的基础记录，适合在灰度完成、失败或人工检查后沉淀阶段结果。
+
 ## Rollout 状态
 
 服务运行在 Kubernetes 内时，会通过 ServiceAccount token 读取同命名空间的 `Rollout` 和 `AnalysisRun` 资源。Helm chart 会为 `cloudops-cicd` 创建最小 RBAC：
@@ -155,6 +158,7 @@ curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/records/dev-cloudop
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway/rollback-candidates
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway-rollout/release
 curl http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway-rollout/rollout
+curl -X POST http://127.0.0.1:8080/api/v1/cicd/apps/cloudops-gateway-rollout/records/snapshot
 curl http://127.0.0.1:8080/api/v1/cicd/apps/rollouts-demo-istio/rollout
 curl http://127.0.0.1:8080/api/v1/cicd/apps/rollouts-demo-istio/analysisruns
 curl -X POST http://127.0.0.1:8080/api/v1/cicd/releases/records \
