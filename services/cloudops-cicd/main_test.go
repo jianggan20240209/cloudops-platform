@@ -144,3 +144,57 @@ func TestBuildReleaseSnapshotStoresNotReady(t *testing.T) {
 		t.Fatalf("snapshot record ID should not overwrite base release record ID")
 	}
 }
+
+func TestDestinationRuleMatchesApp(t *testing.T) {
+	item := k8sDestinationRule{}
+	item.Metadata.Name = "cloudops-gateway-rollout-canary"
+	item.Spec.Host = "cloudops-gateway-rollout-canary"
+	if !destinationRuleMatchesApp(item, "cloudops-gateway-rollout") {
+		t.Fatal("destinationRuleMatchesApp() = false, want true")
+	}
+}
+
+func TestVirtualServiceFromKubernetes(t *testing.T) {
+	item := k8sVirtualService{}
+	item.Metadata.Name = "cloudops-gateway-rollout"
+	item.Metadata.Namespace = "cloudops-dev"
+	item.Spec.Hosts = []string{"api.cloudops.jianggan.cn"}
+	item.Spec.Gateways = []string{"cloudops-gateway-rollout"}
+	item.Spec.HTTP = append(item.Spec.HTTP, struct {
+		Name    string `json:"name"`
+		Timeout string `json:"timeout"`
+		Retries *struct {
+			Attempts      int    `json:"attempts"`
+			PerTryTimeout string `json:"perTryTimeout"`
+			RetryOn       string `json:"retryOn"`
+		} `json:"retries"`
+		Route []struct {
+			Destination struct {
+				Host string `json:"host"`
+				Port struct {
+					Number int `json:"number"`
+				} `json:"port"`
+			} `json:"destination"`
+			Weight int `json:"weight"`
+		} `json:"route"`
+	}{Name: "primary"})
+	item.Spec.HTTP[0].Route = append(item.Spec.HTTP[0].Route, struct {
+		Destination struct {
+			Host string `json:"host"`
+			Port struct {
+				Number int `json:"number"`
+			} `json:"port"`
+		} `json:"destination"`
+		Weight int `json:"weight"`
+	}{Weight: 100})
+	item.Spec.HTTP[0].Route[0].Destination.Host = "cloudops-gateway-rollout-stable"
+	item.Spec.HTTP[0].Route[0].Destination.Port.Number = 80
+
+	summary := virtualServiceFromKubernetes(item)
+	if summary.HTTP[0].Routes[0].Host != "cloudops-gateway-rollout-stable" {
+		t.Fatalf("route host = %q", summary.HTTP[0].Routes[0].Host)
+	}
+	if summary.HTTP[0].Routes[0].Weight != 100 {
+		t.Fatalf("route weight = %d", summary.HTTP[0].Routes[0].Weight)
+	}
+}

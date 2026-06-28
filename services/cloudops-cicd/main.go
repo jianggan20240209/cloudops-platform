@@ -353,6 +353,70 @@ type AnalysisMetricSummary struct {
 	Message string `json:"message,omitempty"`
 }
 
+type TrafficSummary struct {
+	Name             string                   `json:"name"`
+	Namespace        string                   `json:"namespace"`
+	VirtualService   *VirtualServiceSummary   `json:"virtual_service,omitempty"`
+	DestinationRules []DestinationRuleSummary `json:"destination_rules,omitempty"`
+	Source           string                   `json:"source"`
+}
+
+type VirtualServiceSummary struct {
+	Name      string         `json:"name"`
+	Namespace string         `json:"namespace"`
+	Hosts     []string       `json:"hosts,omitempty"`
+	Gateways  []string       `json:"gateways,omitempty"`
+	HTTP      []HTTPRouteSum `json:"http,omitempty"`
+}
+
+type HTTPRouteSum struct {
+	Name    string       `json:"name,omitempty"`
+	Timeout string       `json:"timeout,omitempty"`
+	Retries *RetryPolicy `json:"retries,omitempty"`
+	Routes  []RouteDest  `json:"routes,omitempty"`
+}
+
+type RetryPolicy struct {
+	Attempts      int    `json:"attempts,omitempty"`
+	PerTryTimeout string `json:"per_try_timeout,omitempty"`
+	RetryOn       string `json:"retry_on,omitempty"`
+}
+
+type RouteDest struct {
+	Host   string `json:"host"`
+	Port   int    `json:"port,omitempty"`
+	Weight int    `json:"weight"`
+}
+
+type DestinationRuleSummary struct {
+	Name             string                 `json:"name"`
+	Namespace        string                 `json:"namespace"`
+	Host             string                 `json:"host"`
+	ConnectionPool   *ConnectionPoolSummary `json:"connection_pool,omitempty"`
+	OutlierDetection *OutlierDetectionSum   `json:"outlier_detection,omitempty"`
+}
+
+type ConnectionPoolSummary struct {
+	TCP  *TCPPoolSummary  `json:"tcp,omitempty"`
+	HTTP *HTTPPoolSummary `json:"http,omitempty"`
+}
+
+type TCPPoolSummary struct {
+	MaxConnections int `json:"max_connections,omitempty"`
+}
+
+type HTTPPoolSummary struct {
+	HTTP1MaxPendingRequests  int `json:"http1_max_pending_requests,omitempty"`
+	MaxRequestsPerConnection int `json:"max_requests_per_connection,omitempty"`
+}
+
+type OutlierDetectionSum struct {
+	Consecutive5xxErrors int    `json:"consecutive_5xx_errors,omitempty"`
+	Interval             string `json:"interval,omitempty"`
+	BaseEjectionTime     string `json:"base_ejection_time,omitempty"`
+	MaxEjectionPercent   int    `json:"max_ejection_percent,omitempty"`
+}
+
 type k8sRollout struct {
 	Metadata struct {
 		Name      string `json:"name"`
@@ -396,6 +460,66 @@ type k8sAnalysisRun struct {
 			Message string `json:"message"`
 		} `json:"metricResults"`
 	} `json:"status"`
+}
+
+type k8sVirtualService struct {
+	Metadata struct {
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	} `json:"metadata"`
+	Spec struct {
+		Hosts    []string `json:"hosts"`
+		Gateways []string `json:"gateways"`
+		HTTP     []struct {
+			Name    string `json:"name"`
+			Timeout string `json:"timeout"`
+			Retries *struct {
+				Attempts      int    `json:"attempts"`
+				PerTryTimeout string `json:"perTryTimeout"`
+				RetryOn       string `json:"retryOn"`
+			} `json:"retries"`
+			Route []struct {
+				Destination struct {
+					Host string `json:"host"`
+					Port struct {
+						Number int `json:"number"`
+					} `json:"port"`
+				} `json:"destination"`
+				Weight int `json:"weight"`
+			} `json:"route"`
+		} `json:"http"`
+	} `json:"spec"`
+}
+
+type k8sDestinationRuleList struct {
+	Items []k8sDestinationRule `json:"items"`
+}
+
+type k8sDestinationRule struct {
+	Metadata struct {
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	} `json:"metadata"`
+	Spec struct {
+		Host          string `json:"host"`
+		TrafficPolicy *struct {
+			ConnectionPool *struct {
+				TCP *struct {
+					MaxConnections int `json:"maxConnections"`
+				} `json:"tcp"`
+				HTTP *struct {
+					HTTP1MaxPendingRequests  int `json:"http1MaxPendingRequests"`
+					MaxRequestsPerConnection int `json:"maxRequestsPerConnection"`
+				} `json:"http"`
+			} `json:"connectionPool"`
+			OutlierDetection *struct {
+				Consecutive5xxErrors int    `json:"consecutive5xxErrors"`
+				Interval             string `json:"interval"`
+				BaseEjectionTime     string `json:"baseEjectionTime"`
+				MaxEjectionPercent   int    `json:"maxEjectionPercent"`
+			} `json:"outlierDetection"`
+		} `json:"trafficPolicy"`
+	} `json:"spec"`
 }
 
 type prometheusQueryResponse struct {
@@ -796,6 +920,21 @@ func appDetailHandler(w http.ResponseWriter, r *http.Request) {
 			"total":  len(items),
 			"source": "kubernetes",
 		})
+	case "traffic":
+		if len(parts) != 2 {
+			notFoundHandler(w, r)
+			return
+		}
+		summary, err := loadTrafficSummary(r.Context(), app)
+		if err != nil {
+			writeJSON(w, http.StatusOK, envelope{
+				"name":    app.Name,
+				"source":  "kubernetes",
+				"warning": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, summary)
 	default:
 		notFoundHandler(w, r)
 	}
@@ -1616,6 +1755,136 @@ func loadAnalysisRunsWithClient(ctx context.Context, client *KubernetesClient, a
 		return items[i].StartedAt > items[j].StartedAt
 	})
 	return items, nil
+}
+
+func loadTrafficSummary(ctx context.Context, app AppSummary) (TrafficSummary, error) {
+	client, ok, err := newKubernetesClientFromEnv()
+	if err != nil || !ok {
+		return TrafficSummary{}, err
+	}
+
+	var virtualService *VirtualServiceSummary
+	var vs k8sVirtualService
+	vsPath := fmt.Sprintf("/apis/networking.istio.io/v1beta1/namespaces/%s/virtualservices/%s", url.PathEscape(app.Namespace), url.PathEscape(app.Name))
+	status, err := client.GetJSON(ctx, vsPath, &vs)
+	if err != nil && status != http.StatusNotFound {
+		return TrafficSummary{}, err
+	}
+	if err == nil {
+		summary := virtualServiceFromKubernetes(vs)
+		virtualService = &summary
+	}
+
+	destinationRules, err := loadDestinationRules(ctx, client, app)
+	if err != nil {
+		return TrafficSummary{}, err
+	}
+
+	return TrafficSummary{
+		Name:             app.Name,
+		Namespace:        app.Namespace,
+		VirtualService:   virtualService,
+		DestinationRules: destinationRules,
+		Source:           "kubernetes",
+	}, nil
+}
+
+func loadDestinationRules(ctx context.Context, client *KubernetesClient, app AppSummary) ([]DestinationRuleSummary, error) {
+	var list k8sDestinationRuleList
+	apiPath := fmt.Sprintf("/apis/networking.istio.io/v1beta1/namespaces/%s/destinationrules", url.PathEscape(app.Namespace))
+	if _, err := client.GetJSON(ctx, apiPath, &list); err != nil {
+		return nil, err
+	}
+
+	items := make([]DestinationRuleSummary, 0)
+	for _, item := range list.Items {
+		if !destinationRuleMatchesApp(item, app.Name) {
+			continue
+		}
+		items = append(items, destinationRuleFromKubernetes(item))
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].Name < items[j].Name
+	})
+	return items, nil
+}
+
+func destinationRuleMatchesApp(item k8sDestinationRule, appName string) bool {
+	return item.Metadata.Name == appName ||
+		strings.HasPrefix(item.Metadata.Name, appName+"-") ||
+		item.Spec.Host == appName ||
+		strings.HasPrefix(item.Spec.Host, appName+"-")
+}
+
+func virtualServiceFromKubernetes(item k8sVirtualService) VirtualServiceSummary {
+	routes := make([]HTTPRouteSum, 0, len(item.Spec.HTTP))
+	for _, httpRoute := range item.Spec.HTTP {
+		destinations := make([]RouteDest, 0, len(httpRoute.Route))
+		for _, route := range httpRoute.Route {
+			destinations = append(destinations, RouteDest{
+				Host:   route.Destination.Host,
+				Port:   route.Destination.Port.Number,
+				Weight: route.Weight,
+			})
+		}
+		var retries *RetryPolicy
+		if httpRoute.Retries != nil {
+			retries = &RetryPolicy{
+				Attempts:      httpRoute.Retries.Attempts,
+				PerTryTimeout: httpRoute.Retries.PerTryTimeout,
+				RetryOn:       httpRoute.Retries.RetryOn,
+			}
+		}
+		routes = append(routes, HTTPRouteSum{
+			Name:    httpRoute.Name,
+			Timeout: httpRoute.Timeout,
+			Retries: retries,
+			Routes:  destinations,
+		})
+	}
+	return VirtualServiceSummary{
+		Name:      item.Metadata.Name,
+		Namespace: item.Metadata.Namespace,
+		Hosts:     item.Spec.Hosts,
+		Gateways:  item.Spec.Gateways,
+		HTTP:      routes,
+	}
+}
+
+func destinationRuleFromKubernetes(item k8sDestinationRule) DestinationRuleSummary {
+	var connectionPool *ConnectionPoolSummary
+	var outlierDetection *OutlierDetectionSum
+	if item.Spec.TrafficPolicy != nil {
+		if item.Spec.TrafficPolicy.ConnectionPool != nil {
+			connectionPool = &ConnectionPoolSummary{}
+			if item.Spec.TrafficPolicy.ConnectionPool.TCP != nil {
+				connectionPool.TCP = &TCPPoolSummary{
+					MaxConnections: item.Spec.TrafficPolicy.ConnectionPool.TCP.MaxConnections,
+				}
+			}
+			if item.Spec.TrafficPolicy.ConnectionPool.HTTP != nil {
+				connectionPool.HTTP = &HTTPPoolSummary{
+					HTTP1MaxPendingRequests:  item.Spec.TrafficPolicy.ConnectionPool.HTTP.HTTP1MaxPendingRequests,
+					MaxRequestsPerConnection: item.Spec.TrafficPolicy.ConnectionPool.HTTP.MaxRequestsPerConnection,
+				}
+			}
+		}
+		if item.Spec.TrafficPolicy.OutlierDetection != nil {
+			outlierDetection = &OutlierDetectionSum{
+				Consecutive5xxErrors: item.Spec.TrafficPolicy.OutlierDetection.Consecutive5xxErrors,
+				Interval:             item.Spec.TrafficPolicy.OutlierDetection.Interval,
+				BaseEjectionTime:     item.Spec.TrafficPolicy.OutlierDetection.BaseEjectionTime,
+				MaxEjectionPercent:   item.Spec.TrafficPolicy.OutlierDetection.MaxEjectionPercent,
+			}
+		}
+	}
+	return DestinationRuleSummary{
+		Name:             item.Metadata.Name,
+		Namespace:        item.Metadata.Namespace,
+		Host:             item.Spec.Host,
+		ConnectionPool:   connectionPool,
+		OutlierDetection: outlierDetection,
+	}
 }
 
 func rolloutFromKubernetes(rollout k8sRollout, analysisRuns []AnalysisRunSummary) RolloutSummary {
