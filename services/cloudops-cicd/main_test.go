@@ -321,8 +321,8 @@ func TestReleaseRecordFromDetailIncludesObservability(t *testing.T) {
 func TestIstioMetricSelectors(t *testing.T) {
 	app := AppSummary{Name: "cloudops-gateway-rollout", Namespace: "cloudops-dev"}
 	selectors := istioMetricSelectors(app)
-	if len(selectors) < 4 {
-		t.Fatalf("selectors = %d, want at least 4", len(selectors))
+	if len(selectors) < 6 {
+		t.Fatalf("selectors = %d, want at least 6", len(selectors))
 	}
 	if selectors[0].Selector != `destination_service_name=~"cloudops-gateway-rollout-.*"` {
 		t.Fatalf("first selector = %q", selectors[0].Selector)

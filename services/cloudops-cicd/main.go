@@ -1995,9 +1995,17 @@ func loadIstioMetrics(app AppSummary) (IstioMetricsSummary, error) {
 		for _, sel := range selectors {
 			names = append(names, sel.Name)
 		}
+		message := fmt.Sprintf("no istio request metrics matched selectors: %s", strings.Join(names, ", "))
+		hasIstio, err := prometheusHasIstioMetrics(client)
+		if err != nil {
+			return IstioMetricsSummary{}, err
+		}
+		if !hasIstio {
+			message += "; istio_requests_total is not present in Prometheus (enable istio-ingressgateway PodMonitor scrape)"
+		}
 		return IstioMetricsSummary{
 			Source:  "prometheus",
-			Message: fmt.Sprintf("no istio request metrics matched selectors: %s", strings.Join(names, ", ")),
+			Message: message,
 		}, nil
 	}
 
@@ -2062,7 +2070,25 @@ func istioMetricSelectors(app AppSummary) []istioMetricSelector {
 			Selector:   fmt.Sprintf(`source_workload="istio-ingressgateway",destination_service=~%q`, serviceFQDN),
 			GroupLabel: "destination_service",
 		},
+		{
+			Name:       "ingress_to_namespace",
+			Selector:   fmt.Sprintf(`source_workload="istio-ingressgateway",destination_service_namespace=%q,destination_service=~%q`, ns, name+`-.*`),
+			GroupLabel: "destination_service",
+		},
+		{
+			Name:       "destination_service_namespace",
+			Selector:   fmt.Sprintf(`destination_service_namespace=%q,destination_service=~%q`, ns, serviceFQDN),
+			GroupLabel: "destination_service",
+		},
 	}
+}
+
+func prometheusHasIstioMetrics(client *PrometheusClient) (bool, error) {
+	_, series, err := client.QueryScalar(`count(istio_requests_total)`)
+	if err != nil {
+		return false, err
+	}
+	return series > 0, nil
 }
 
 func queryIstioRequestRate(client *PrometheusClient, selectors []istioMetricSelector) (float64, istioMetricSelector, error) {
