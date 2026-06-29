@@ -245,3 +245,74 @@ func TestVirtualServiceFromKubernetes(t *testing.T) {
 		t.Fatalf("route weight = %d", summary.HTTP[0].Routes[0].Weight)
 	}
 }
+
+func TestInferCanaryStage(t *testing.T) {
+	tests := []struct {
+		name         string
+		rollout      *RolloutSummary
+		stableWeight int
+		canaryWeight int
+		want         string
+	}{
+		{name: "stable", stableWeight: 100, canaryWeight: 0, want: "stable"},
+		{name: "canary25", stableWeight: 75, canaryWeight: 25, want: "canary_25"},
+		{name: "canary50", stableWeight: 50, canaryWeight: 50, want: "canary_50"},
+		{name: "progressing", rollout: &RolloutSummary{Phase: "Progressing"}, stableWeight: 0, canaryWeight: 0, want: "progressing"},
+	}
+
+	for _, tt := range tests {
+		if got := inferCanaryStage(tt.rollout, tt.stableWeight, tt.canaryWeight); got != tt.want {
+			t.Fatalf("%s inferCanaryStage() = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestBuildCanaryStageSummary(t *testing.T) {
+	traffic := &TrafficSummary{
+		VirtualService: &VirtualServiceSummary{
+			HTTP: []HTTPRouteSum{{
+				Routes: []RouteDest{
+					{Host: "cloudops-gateway-rollout-stable", Weight: 75},
+					{Host: "cloudops-gateway-rollout-canary", Weight: 25},
+				},
+			}},
+		},
+	}
+	rollout := &RolloutSummary{Phase: "Progressing", CurrentStepIndex: 2}
+
+	stage := buildCanaryStageSummary(rollout, traffic)
+	if stage.Stage != "canary_25" {
+		t.Fatalf("stage = %q", stage.Stage)
+	}
+	if stage.StableWeight != 75 || stage.CanaryWeight != 25 {
+		t.Fatalf("weights = %d/%d", stage.StableWeight, stage.CanaryWeight)
+	}
+}
+
+func TestReleaseRecordFromDetailIncludesObservability(t *testing.T) {
+	app := AppSummary{Name: "cloudops-gateway-rollout", Env: "dev", Namespace: "cloudops-dev", CurrentTag: "main-13"}
+	detail := ReleaseDetail{
+		Ready: true,
+		Observability: &ObservabilitySummary{
+			Source: "kubernetes,prometheus",
+			CanaryStage: &CanaryStageSummary{
+				Stage:        "canary_25",
+				StableWeight: 75,
+				CanaryWeight: 25,
+			},
+			IstioMetrics: &IstioMetricsSummary{
+				RequestRateRPS: 1.2,
+				Source:         "prometheus",
+			},
+		},
+		Checks:      []CheckResult{{Name: "ready", Status: "pass", Message: "ok"}},
+		GeneratedAt: "2026-06-29T00:00:00Z",
+	}
+	record := releaseRecordFromDetail(app, detail)
+	if record.Verification.Observability == nil {
+		t.Fatal("record.Verification.Observability is nil")
+	}
+	if record.Verification.Observability.CanaryStage.Stage != "canary_25" {
+		t.Fatalf("canary stage = %q", record.Verification.Observability.CanaryStage.Stage)
+	}
+}

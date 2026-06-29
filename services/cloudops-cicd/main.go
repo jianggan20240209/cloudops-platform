@@ -250,35 +250,37 @@ type CheckResult struct {
 }
 
 type ReleaseDetail struct {
-	Name        string            `json:"name"`
-	Env         string            `json:"env"`
-	Namespace   string            `json:"namespace"`
-	ArgoCDApp   string            `json:"argocd_app"`
-	Image       string            `json:"image"`
-	CurrentTag  string            `json:"current_tag"`
-	Sync        string            `json:"sync"`
-	Health      string            `json:"health"`
-	Revision    string            `json:"revision,omitempty"`
-	UpdatedAt   string            `json:"updated_at,omitempty"`
-	Images      []ImageTagSummary `json:"images"`
-	Metrics     MetricsSummary    `json:"metrics"`
-	Rollout     *RolloutSummary   `json:"rollout,omitempty"`
-	Traffic     *TrafficSummary   `json:"traffic,omitempty"`
-	Checks      []CheckResult     `json:"checks"`
-	Ready       bool              `json:"ready"`
-	Source      string            `json:"source"`
-	Warnings    []string          `json:"warnings,omitempty"`
-	GeneratedAt string            `json:"generated_at"`
+	Name          string                `json:"name"`
+	Env           string                `json:"env"`
+	Namespace     string                `json:"namespace"`
+	ArgoCDApp     string                `json:"argocd_app"`
+	Image         string                `json:"image"`
+	CurrentTag    string                `json:"current_tag"`
+	Sync          string                `json:"sync"`
+	Health        string                `json:"health"`
+	Revision      string                `json:"revision,omitempty"`
+	UpdatedAt     string                `json:"updated_at,omitempty"`
+	Images        []ImageTagSummary     `json:"images"`
+	Metrics       MetricsSummary        `json:"metrics"`
+	Rollout       *RolloutSummary       `json:"rollout,omitempty"`
+	Traffic       *TrafficSummary       `json:"traffic,omitempty"`
+	Observability *ObservabilitySummary `json:"observability,omitempty"`
+	Checks        []CheckResult         `json:"checks"`
+	Ready         bool                  `json:"ready"`
+	Source        string                `json:"source"`
+	Warnings      []string              `json:"warnings,omitempty"`
+	GeneratedAt   string                `json:"generated_at"`
 }
 
 type ReleaseVerification struct {
-	Ready      bool            `json:"ready"`
-	Checks     []CheckResult   `json:"checks"`
-	Metrics    MetricsSummary  `json:"metrics"`
-	Rollout    *RolloutSummary `json:"rollout,omitempty"`
-	Traffic    *TrafficSummary `json:"traffic,omitempty"`
-	Warnings   []string        `json:"warnings,omitempty"`
-	VerifiedAt string          `json:"verified_at"`
+	Ready         bool                  `json:"ready"`
+	Checks        []CheckResult         `json:"checks"`
+	Metrics       MetricsSummary        `json:"metrics"`
+	Rollout       *RolloutSummary       `json:"rollout,omitempty"`
+	Traffic       *TrafficSummary       `json:"traffic,omitempty"`
+	Observability *ObservabilitySummary `json:"observability,omitempty"`
+	Warnings      []string              `json:"warnings,omitempty"`
+	VerifiedAt    string                `json:"verified_at"`
 }
 
 type ReleaseRecord struct {
@@ -417,6 +419,37 @@ type OutlierDetectionSum struct {
 	Interval             string `json:"interval,omitempty"`
 	BaseEjectionTime     string `json:"base_ejection_time,omitempty"`
 	MaxEjectionPercent   int    `json:"max_ejection_percent,omitempty"`
+}
+
+type CanaryStageSummary struct {
+	Phase            string `json:"phase,omitempty"`
+	CurrentStepIndex int    `json:"current_step_index,omitempty"`
+	StableWeight     int    `json:"stable_weight,omitempty"`
+	CanaryWeight     int    `json:"canary_weight,omitempty"`
+	Stage            string `json:"stage"`
+}
+
+type IstioDestinationMetric struct {
+	Destination      string  `json:"destination"`
+	RequestRateRPS   float64 `json:"request_rate_rps,omitempty"`
+	ErrorRateRPS     float64 `json:"error_rate_rps,omitempty"`
+	ErrorRatePercent float64 `json:"error_rate_percent,omitempty"`
+}
+
+type IstioMetricsSummary struct {
+	RequestRateRPS   float64                  `json:"request_rate_rps,omitempty"`
+	ErrorRateRPS     float64                  `json:"error_rate_rps,omitempty"`
+	ErrorRatePercent float64                  `json:"error_rate_percent,omitempty"`
+	P95LatencyMS     float64                  `json:"p95_latency_ms,omitempty"`
+	ByDestination    []IstioDestinationMetric `json:"by_destination,omitempty"`
+	Source           string                   `json:"source"`
+	Message          string                   `json:"message,omitempty"`
+}
+
+type ObservabilitySummary struct {
+	CanaryStage  *CanaryStageSummary  `json:"canary_stage,omitempty"`
+	IstioMetrics *IstioMetricsSummary `json:"istio_metrics,omitempty"`
+	Source       string               `json:"source"`
 }
 
 type k8sRollout struct {
@@ -937,6 +970,21 @@ func appDetailHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, summary)
+	case "observability":
+		if len(parts) != 2 {
+			notFoundHandler(w, r)
+			return
+		}
+		summary, err := loadObservabilitySummary(r.Context(), app)
+		if err != nil {
+			writeJSON(w, http.StatusOK, envelope{
+				"name":    app.Name,
+				"source":  "prometheus",
+				"warning": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, summary)
 	default:
 		notFoundHandler(w, r)
 	}
@@ -1038,6 +1086,14 @@ func buildReleaseDetail(app AppSummary) ReleaseDetail {
 		traffic = &trafficSummary
 	}
 
+	var observability *ObservabilitySummary
+	observabilitySummary, err := loadObservabilitySummary(context.Background(), app)
+	if err != nil {
+		warnings = append(warnings, err.Error())
+	} else if observabilitySummary.Source != "" {
+		observability = &observabilitySummary
+	}
+
 	checks := buildReleaseChecks(app, images, metrics, rollout)
 	ready := true
 	for _, check := range checks {
@@ -1048,25 +1104,26 @@ func buildReleaseDetail(app AppSummary) ReleaseDetail {
 	}
 
 	return ReleaseDetail{
-		Name:        app.Name,
-		Env:         app.Env,
-		Namespace:   app.Namespace,
-		ArgoCDApp:   app.ArgoCDApp,
-		Image:       app.Image,
-		CurrentTag:  app.CurrentTag,
-		Sync:        app.Sync,
-		Health:      app.Health,
-		Revision:    app.Revision,
-		UpdatedAt:   app.UpdatedAt,
-		Images:      images,
-		Metrics:     metrics,
-		Rollout:     rollout,
-		Traffic:     traffic,
-		Checks:      checks,
-		Ready:       ready,
-		Source:      fmt.Sprintf("app:%s,images:%s,metrics:%s", app.Source, imageSource, metrics.Source),
-		Warnings:    warnings,
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Name:          app.Name,
+		Env:           app.Env,
+		Namespace:     app.Namespace,
+		ArgoCDApp:     app.ArgoCDApp,
+		Image:         app.Image,
+		CurrentTag:    app.CurrentTag,
+		Sync:          app.Sync,
+		Health:        app.Health,
+		Revision:      app.Revision,
+		UpdatedAt:     app.UpdatedAt,
+		Images:        images,
+		Metrics:       metrics,
+		Rollout:       rollout,
+		Traffic:       traffic,
+		Observability: observability,
+		Checks:        checks,
+		Ready:         ready,
+		Source:        fmt.Sprintf("app:%s,images:%s,metrics:%s", app.Source, imageSource, metrics.Source),
+		Warnings:      warnings,
+		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
 }
 
@@ -1368,13 +1425,14 @@ func releaseRecordFromDetail(app AppSummary, detail ReleaseDetail) ReleaseRecord
 		ArgoCDHealth:   app.Health,
 		Status:         releaseRecordStatus(detail.Ready),
 		Verification: ReleaseVerification{
-			Ready:      detail.Ready,
-			Checks:     detail.Checks,
-			Metrics:    detail.Metrics,
-			Rollout:    detail.Rollout,
-			Traffic:    detail.Traffic,
-			Warnings:   detail.Warnings,
-			VerifiedAt: detail.GeneratedAt,
+			Ready:         detail.Ready,
+			Checks:        detail.Checks,
+			Metrics:       detail.Metrics,
+			Rollout:       detail.Rollout,
+			Traffic:       detail.Traffic,
+			Observability: detail.Observability,
+			Warnings:      detail.Warnings,
+			VerifiedAt:    detail.GeneratedAt,
 		},
 		Source:    detail.Source,
 		CreatedAt: createdAt,
@@ -1821,6 +1879,195 @@ func loadDestinationRules(ctx context.Context, client *KubernetesClient, app App
 	return items, nil
 }
 
+func loadObservabilitySummary(ctx context.Context, app AppSummary) (ObservabilitySummary, error) {
+	var rollout *RolloutSummary
+	rolloutSummary, ok, err := loadRolloutSummary(ctx, app)
+	if err != nil {
+		return ObservabilitySummary{}, err
+	}
+	if ok {
+		rollout = &rolloutSummary
+	}
+
+	var traffic *TrafficSummary
+	trafficSummary, err := loadTrafficSummary(ctx, app)
+	if err == nil && trafficSummary.Source != "" {
+		traffic = &trafficSummary
+	}
+
+	summary := ObservabilitySummary{Source: "static"}
+	if rollout != nil || traffic != nil {
+		stage := buildCanaryStageSummary(rollout, traffic)
+		summary.CanaryStage = &stage
+		summary.Source = "kubernetes"
+	}
+
+	istioMetrics, promErr := loadIstioMetrics(app)
+	if promErr == nil && istioMetrics.Source != "" {
+		summary.IstioMetrics = &istioMetrics
+		if summary.Source == "static" {
+			summary.Source = "prometheus"
+		} else {
+			summary.Source = "kubernetes,prometheus"
+		}
+	}
+	if summary.Source == "static" {
+		return ObservabilitySummary{}, promErr
+	}
+	return summary, promErr
+}
+
+func buildCanaryStageSummary(rollout *RolloutSummary, traffic *TrafficSummary) CanaryStageSummary {
+	stableWeight, canaryWeight := extractCanaryWeights(traffic)
+	stage := inferCanaryStage(rollout, stableWeight, canaryWeight)
+
+	summary := CanaryStageSummary{
+		StableWeight: stableWeight,
+		CanaryWeight: canaryWeight,
+		Stage:        stage,
+	}
+	if rollout != nil {
+		summary.Phase = rollout.Phase
+		summary.CurrentStepIndex = rollout.CurrentStepIndex
+	}
+	return summary
+}
+
+func extractCanaryWeights(traffic *TrafficSummary) (int, int) {
+	if traffic == nil || traffic.VirtualService == nil {
+		return 100, 0
+	}
+	for _, httpRoute := range traffic.VirtualService.HTTP {
+		stableWeight, canaryWeight := 0, 0
+		for _, route := range httpRoute.Routes {
+			if strings.Contains(route.Host, "-canary") {
+				canaryWeight = route.Weight
+			} else {
+				stableWeight = route.Weight
+			}
+		}
+		if stableWeight > 0 || canaryWeight > 0 {
+			return stableWeight, canaryWeight
+		}
+	}
+	return 100, 0
+}
+
+func inferCanaryStage(rollout *RolloutSummary, stableWeight, canaryWeight int) string {
+	if canaryWeight == 0 && stableWeight > 0 {
+		return "stable"
+	}
+	if canaryWeight == 100 {
+		return "canary_full"
+	}
+	if canaryWeight > 0 {
+		return fmt.Sprintf("canary_%d", canaryWeight)
+	}
+	if rollout != nil && rollout.Phase == "Progressing" {
+		return "progressing"
+	}
+	if rollout != nil && rollout.Phase != "" {
+		return strings.ToLower(rollout.Phase)
+	}
+	return "unknown"
+}
+
+func loadIstioMetrics(app AppSummary) (IstioMetricsSummary, error) {
+	client, ok := newPrometheusClientFromEnv()
+	if !ok {
+		return IstioMetricsSummary{}, fmt.Errorf("prometheus server is not configured")
+	}
+
+	destRegex := istioDestinationRegex(app.Name)
+	requestQuery := fmt.Sprintf(`sum(rate(istio_requests_total{destination_service_name=~%q}[5m]))`, destRegex)
+	errorQuery := fmt.Sprintf(`sum(rate(istio_requests_total{destination_service_name=~%q,response_code=~"5.."}[5m]))`, destRegex)
+	latencyQuery := fmt.Sprintf(`histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{destination_service_name=~%q}[5m])) by (le))`, destRegex)
+
+	requestRate, requestSeries, err := client.QueryScalar(requestQuery)
+	if err != nil {
+		return IstioMetricsSummary{}, err
+	}
+	if requestSeries == 0 {
+		return IstioMetricsSummary{
+			Source:  "prometheus",
+			Message: fmt.Sprintf("no istio request metrics matched destination_service_name=~%q", destRegex),
+		}, nil
+	}
+
+	errorRate, _, err := client.QueryScalar(errorQuery)
+	if err != nil {
+		return IstioMetricsSummary{}, err
+	}
+
+	p95Latency, _, err := client.QueryScalar(latencyQuery)
+	if err != nil {
+		return IstioMetricsSummary{}, err
+	}
+
+	errorPercent := 0.0
+	if requestRate > 0 {
+		errorPercent = (errorRate / requestRate) * 100
+	}
+
+	byDestination, err := loadIstioDestinationMetrics(client, destRegex)
+	if err != nil {
+		log.Printf("failed to load istio destination metrics app=%s: %v", app.Name, err)
+	}
+
+	return IstioMetricsSummary{
+		RequestRateRPS:   requestRate,
+		ErrorRateRPS:     errorRate,
+		ErrorRatePercent: errorPercent,
+		P95LatencyMS:     p95Latency,
+		ByDestination:    byDestination,
+		Source:           "prometheus",
+	}, nil
+}
+
+func loadIstioDestinationMetrics(client *PrometheusClient, destRegex string) ([]IstioDestinationMetric, error) {
+	requestQuery := fmt.Sprintf(`sum by (destination_service_name) (rate(istio_requests_total{destination_service_name=~%q}[5m]))`, destRegex)
+	errorQuery := fmt.Sprintf(`sum by (destination_service_name) (rate(istio_requests_total{destination_service_name=~%q,response_code=~"5.."}[5m]))`, destRegex)
+
+	requests, err := client.QueryVector(requestQuery)
+	if err != nil {
+		return nil, err
+	}
+	errors, err := client.QueryVector(errorQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	destinations := make(map[string]IstioDestinationMetric)
+	for label, value := range requests {
+		destinations[label] = IstioDestinationMetric{
+			Destination:    label,
+			RequestRateRPS: value,
+		}
+	}
+	for label, value := range errors {
+		item := destinations[label]
+		item.Destination = label
+		item.ErrorRateRPS = value
+		if item.RequestRateRPS > 0 {
+			item.ErrorRatePercent = (value / item.RequestRateRPS) * 100
+		}
+		destinations[label] = item
+	}
+
+	items := make([]IstioDestinationMetric, 0, len(destinations))
+	for _, item := range destinations {
+		items = append(items, item)
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].Destination < items[j].Destination
+	})
+	return items, nil
+}
+
+func istioDestinationRegex(appName string) string {
+	return appName + "-.*"
+}
+
 func destinationRuleMatchesApp(item k8sDestinationRule, appName string) bool {
 	return item.Metadata.Name == appName ||
 		strings.HasPrefix(item.Metadata.Name, appName+"-") ||
@@ -1965,47 +2212,15 @@ func serviceUpQuery(namespace string, service string) string {
 }
 
 func (c *PrometheusClient) queryUp(name string, query string, noTargetsMessage string) (MetricsSummary, error) {
-	apiURL := c.server + "/api/v1/query?query=" + url.QueryEscape(query)
-
-	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	result, err := c.query(query)
 	if err != nil {
 		return MetricsSummary{}, err
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return MetricsSummary{}, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return MetricsSummary{}, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return MetricsSummary{}, fmt.Errorf("prometheus api status=%d body=%s", resp.StatusCode, string(body))
-	}
-
-	var result prometheusQueryResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return MetricsSummary{}, err
-	}
-	if result.Status != "success" {
-		return MetricsSummary{}, fmt.Errorf("prometheus query failed: %s", result.Error)
 	}
 
 	var up float64
 	for _, item := range result.Data.Result {
-		if len(item.Value) < 2 {
-			continue
-		}
-		valueText, ok := item.Value[1].(string)
+		value, ok := prometheusItemValue(item)
 		if !ok {
-			continue
-		}
-		value, err := strconv.ParseFloat(valueText, 64)
-		if err != nil {
 			continue
 		}
 		up += value
@@ -2023,6 +2238,99 @@ func (c *PrometheusClient) queryUp(name string, query string, noTargetsMessage s
 		summary.Message = noTargetsMessage
 	}
 	return summary, nil
+}
+
+func (c *PrometheusClient) QueryScalar(query string) (float64, int, error) {
+	result, err := c.query(query)
+	if err != nil {
+		return 0, 0, err
+	}
+	value, ok := prometheusScalarValue(result)
+	if !ok {
+		return 0, 0, nil
+	}
+	return value, len(result.Data.Result), nil
+}
+
+func (c *PrometheusClient) QueryVector(query string) (map[string]float64, error) {
+	result, err := c.query(query)
+	if err != nil {
+		return nil, err
+	}
+	values := make(map[string]float64)
+	for _, item := range result.Data.Result {
+		label := item.Metric["destination_service_name"]
+		if label == "" {
+			label = item.Metric["le"]
+		}
+		if label == "" {
+			continue
+		}
+		value, ok := prometheusItemValue(item)
+		if !ok {
+			continue
+		}
+		values[label] = value
+	}
+	return values, nil
+}
+
+func (c *PrometheusClient) query(query string) (prometheusQueryResponse, error) {
+	apiURL := c.server + "/api/v1/query?query=" + url.QueryEscape(query)
+
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return prometheusQueryResponse{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return prometheusQueryResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return prometheusQueryResponse{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return prometheusQueryResponse{}, fmt.Errorf("prometheus api status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	var result prometheusQueryResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return prometheusQueryResponse{}, err
+	}
+	if result.Status != "success" {
+		return prometheusQueryResponse{}, fmt.Errorf("prometheus query failed: %s", result.Error)
+	}
+	return result, nil
+}
+
+func prometheusScalarValue(result prometheusQueryResponse) (float64, bool) {
+	if len(result.Data.Result) == 0 {
+		return 0, false
+	}
+	return prometheusItemValue(result.Data.Result[0])
+}
+
+func prometheusItemValue(item struct {
+	Metric map[string]string `json:"metric"`
+	Value  []any             `json:"value"`
+}) (float64, bool) {
+	if len(item.Value) < 2 {
+		return 0, false
+	}
+	valueText, ok := item.Value[1].(string)
+	if !ok {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(valueText, 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }
 
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
