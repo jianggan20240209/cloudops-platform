@@ -145,6 +145,53 @@ func TestBuildReleaseSnapshotStoresNotReady(t *testing.T) {
 	}
 }
 
+func TestReleaseRecordFromDetailIncludesTraffic(t *testing.T) {
+	app := AppSummary{
+		Name:       "cloudops-gateway-rollout",
+		Env:        "dev",
+		Namespace:  "cloudops-dev",
+		Image:      "harbor-server.jianggan.cn/cloudops/cloudops-gateway:main-14",
+		CurrentTag: "main-14",
+		Sync:       "Synced",
+		Health:     "Healthy",
+	}
+	detail := ReleaseDetail{
+		Name:       app.Name,
+		Env:        app.Env,
+		Namespace:  app.Namespace,
+		Image:      app.Image,
+		CurrentTag: app.CurrentTag,
+		Sync:       app.Sync,
+		Health:     app.Health,
+		Metrics:    MetricsSummary{Name: app.Name, Source: "prometheus", Up: 2, Targets: 2, Healthy: true},
+		Traffic: &TrafficSummary{
+			Name:      app.Name,
+			Namespace: app.Namespace,
+			VirtualService: &VirtualServiceSummary{
+				Name: app.Name,
+				HTTP: []HTTPRouteSum{
+					{
+						Name: "primary",
+						Routes: []RouteDest{
+							{Host: "cloudops-gateway-rollout-stable", Port: 80, Weight: 100},
+						},
+					},
+				},
+			},
+			Source: "kubernetes",
+		},
+		Checks: []CheckResult{{Name: "ready", Status: "pass", Message: "ok"}},
+		Ready:  true,
+	}
+	record := releaseRecordFromDetail(app, detail)
+	if record.Verification.Traffic == nil {
+		t.Fatal("record.Verification.Traffic is nil")
+	}
+	if record.Verification.Traffic.VirtualService.HTTP[0].Routes[0].Weight != 100 {
+		t.Fatalf("traffic route weight = %d", record.Verification.Traffic.VirtualService.HTTP[0].Routes[0].Weight)
+	}
+}
+
 func TestDestinationRuleMatchesApp(t *testing.T) {
 	item := k8sDestinationRule{}
 	item.Metadata.Name = "cloudops-gateway-rollout-canary"

@@ -263,6 +263,7 @@ type ReleaseDetail struct {
 	Images      []ImageTagSummary `json:"images"`
 	Metrics     MetricsSummary    `json:"metrics"`
 	Rollout     *RolloutSummary   `json:"rollout,omitempty"`
+	Traffic     *TrafficSummary   `json:"traffic,omitempty"`
 	Checks      []CheckResult     `json:"checks"`
 	Ready       bool              `json:"ready"`
 	Source      string            `json:"source"`
@@ -275,6 +276,7 @@ type ReleaseVerification struct {
 	Checks     []CheckResult   `json:"checks"`
 	Metrics    MetricsSummary  `json:"metrics"`
 	Rollout    *RolloutSummary `json:"rollout,omitempty"`
+	Traffic    *TrafficSummary `json:"traffic,omitempty"`
 	Warnings   []string        `json:"warnings,omitempty"`
 	VerifiedAt string          `json:"verified_at"`
 }
@@ -1028,6 +1030,14 @@ func buildReleaseDetail(app AppSummary) ReleaseDetail {
 		rollout = &rolloutSummary
 	}
 
+	var traffic *TrafficSummary
+	trafficSummary, err := loadTrafficSummary(context.Background(), app)
+	if err != nil {
+		warnings = append(warnings, err.Error())
+	} else if trafficSummary.Source != "" && (trafficSummary.VirtualService != nil || len(trafficSummary.DestinationRules) > 0) {
+		traffic = &trafficSummary
+	}
+
 	checks := buildReleaseChecks(app, images, metrics, rollout)
 	ready := true
 	for _, check := range checks {
@@ -1051,6 +1061,7 @@ func buildReleaseDetail(app AppSummary) ReleaseDetail {
 		Images:      images,
 		Metrics:     metrics,
 		Rollout:     rollout,
+		Traffic:     traffic,
 		Checks:      checks,
 		Ready:       ready,
 		Source:      fmt.Sprintf("app:%s,images:%s,metrics:%s", app.Source, imageSource, metrics.Source),
@@ -1361,6 +1372,7 @@ func releaseRecordFromDetail(app AppSummary, detail ReleaseDetail) ReleaseRecord
 			Checks:     detail.Checks,
 			Metrics:    detail.Metrics,
 			Rollout:    detail.Rollout,
+			Traffic:    detail.Traffic,
 			Warnings:   detail.Warnings,
 			VerifiedAt: detail.GeneratedAt,
 		},

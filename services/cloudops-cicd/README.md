@@ -121,7 +121,7 @@ GitOps Helm chart 已支持为 `cloudops-cicd` 启用内置 PostgreSQL StatefulS
 
 Jenkins 可以在镜像构建、Argo CD 同步、健康检查完成后写入一条真实发布记录。回滚候选接口会从发布记录中筛选 `status=succeeded` 且 `verification.ready=true` 的历史版本，并排除当前运行 tag。
 
-`POST /api/v1/cicd/apps/{name}/records/snapshot` 会读取当前应用的 Argo CD、Harbor、Prometheus、Rollout 和 AnalysisRun 聚合结果，生成带时间戳的快照记录并写入 Release Record 存储。快照不会覆盖同一个 imageTag 的基础记录，适合在灰度完成、失败或人工检查后沉淀阶段结果。
+`POST /api/v1/cicd/apps/{name}/records/snapshot` 会读取当前应用的 Argo CD、Harbor、Prometheus、Rollout、AnalysisRun 和 Istio traffic 聚合结果，生成带时间戳的快照记录并写入 Release Record 存储。快照不会覆盖同一个 imageTag 的基础记录，适合在灰度完成、失败或人工检查后沉淀阶段结果。
 
 ## Rollout 状态
 
