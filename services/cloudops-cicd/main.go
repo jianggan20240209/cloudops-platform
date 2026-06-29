@@ -442,8 +442,15 @@ type IstioMetricsSummary struct {
 	ErrorRatePercent float64                  `json:"error_rate_percent,omitempty"`
 	P95LatencyMS     float64                  `json:"p95_latency_ms,omitempty"`
 	ByDestination    []IstioDestinationMetric `json:"by_destination,omitempty"`
+	MatchedSelector  string                   `json:"matched_selector,omitempty"`
 	Source           string                   `json:"source"`
 	Message          string                   `json:"message,omitempty"`
+}
+
+type istioMetricSelector struct {
+	Name       string
+	Selector   string
+	GroupLabel string
 }
 
 type ObservabilitySummary struct {
@@ -1978,28 +1985,28 @@ func loadIstioMetrics(app AppSummary) (IstioMetricsSummary, error) {
 		return IstioMetricsSummary{}, fmt.Errorf("prometheus server is not configured")
 	}
 
-	destRegex := istioDestinationRegex(app.Name)
-	requestQuery := fmt.Sprintf(`sum(rate(istio_requests_total{destination_service_name=~%q}[5m]))`, destRegex)
-	errorQuery := fmt.Sprintf(`sum(rate(istio_requests_total{destination_service_name=~%q,response_code=~"5.."}[5m]))`, destRegex)
-	latencyQuery := fmt.Sprintf(`histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{destination_service_name=~%q}[5m])) by (le))`, destRegex)
-
-	requestRate, requestSeries, err := client.QueryScalar(requestQuery)
+	selectors := istioMetricSelectors(app)
+	requestRate, matched, err := queryIstioRequestRate(client, selectors)
 	if err != nil {
 		return IstioMetricsSummary{}, err
 	}
-	if requestSeries == 0 {
+	if matched.Name == "" {
+		names := make([]string, 0, len(selectors))
+		for _, sel := range selectors {
+			names = append(names, sel.Name)
+		}
 		return IstioMetricsSummary{
 			Source:  "prometheus",
-			Message: fmt.Sprintf("no istio request metrics matched destination_service_name=~%q", destRegex),
+			Message: fmt.Sprintf("no istio request metrics matched selectors: %s", strings.Join(names, ", ")),
 		}, nil
 	}
 
-	errorRate, _, err := client.QueryScalar(errorQuery)
+	errorRate, err := queryIstioErrorRate(client, matched)
 	if err != nil {
 		return IstioMetricsSummary{}, err
 	}
 
-	p95Latency, _, err := client.QueryScalar(latencyQuery)
+	p95Latency, err := queryIstioP95Latency(client, matched)
 	if err != nil {
 		return IstioMetricsSummary{}, err
 	}
@@ -2009,7 +2016,7 @@ func loadIstioMetrics(app AppSummary) (IstioMetricsSummary, error) {
 		errorPercent = (errorRate / requestRate) * 100
 	}
 
-	byDestination, err := loadIstioDestinationMetrics(client, destRegex)
+	byDestination, err := loadIstioDestinationMetrics(client, matched)
 	if err != nil {
 		log.Printf("failed to load istio destination metrics app=%s: %v", app.Name, err)
 	}
@@ -2020,19 +2027,90 @@ func loadIstioMetrics(app AppSummary) (IstioMetricsSummary, error) {
 		ErrorRatePercent: errorPercent,
 		P95LatencyMS:     p95Latency,
 		ByDestination:    byDestination,
+		MatchedSelector:  matched.Name,
 		Source:           "prometheus",
 	}, nil
 }
 
-func loadIstioDestinationMetrics(client *PrometheusClient, destRegex string) ([]IstioDestinationMetric, error) {
-	requestQuery := fmt.Sprintf(`sum by (destination_service_name) (rate(istio_requests_total{destination_service_name=~%q}[5m]))`, destRegex)
-	errorQuery := fmt.Sprintf(`sum by (destination_service_name) (rate(istio_requests_total{destination_service_name=~%q,response_code=~"5.."}[5m]))`, destRegex)
+func istioMetricSelectors(app AppSummary) []istioMetricSelector {
+	name := app.Name
+	ns := app.Namespace
+	serviceFQDN := name + `-.*\\.` + ns + `\\.svc\\.cluster\\.local`
+	return []istioMetricSelector{
+		{
+			Name:       "destination_service_name",
+			Selector:   fmt.Sprintf(`destination_service_name=~%q`, name+`-.*`),
+			GroupLabel: "destination_service_name",
+		},
+		{
+			Name:       "destination_service_fqdn",
+			Selector:   fmt.Sprintf(`destination_service=~%q`, serviceFQDN),
+			GroupLabel: "destination_service",
+		},
+		{
+			Name:       "destination_service_short",
+			Selector:   fmt.Sprintf(`destination_service=~%q`, name+`-(stable|canary)`),
+			GroupLabel: "destination_service",
+		},
+		{
+			Name:       "destination_workload",
+			Selector:   fmt.Sprintf(`destination_workload_namespace=%q,destination_workload=~%q`, ns, name+`.*`),
+			GroupLabel: "destination_workload",
+		},
+		{
+			Name:       "ingress_to_service",
+			Selector:   fmt.Sprintf(`source_workload="istio-ingressgateway",destination_service=~%q`, serviceFQDN),
+			GroupLabel: "destination_service",
+		},
+	}
+}
 
-	requests, err := client.QueryVector(requestQuery)
+func queryIstioRequestRate(client *PrometheusClient, selectors []istioMetricSelector) (float64, istioMetricSelector, error) {
+	for _, sel := range selectors {
+		query := fmt.Sprintf(`sum(rate(istio_requests_total{%s}[5m]))`, sel.Selector)
+		value, series, err := client.QueryScalar(query)
+		if err != nil {
+			return 0, istioMetricSelector{}, err
+		}
+		if series > 0 {
+			return value, sel, nil
+		}
+	}
+	return 0, istioMetricSelector{}, nil
+}
+
+func queryIstioErrorRate(client *PrometheusClient, sel istioMetricSelector) (float64, error) {
+	query := fmt.Sprintf(`sum(rate(istio_requests_total{%s,response_code=~"5.."}[5m]))`, sel.Selector)
+	value, _, err := client.QueryScalar(query)
+	return value, err
+}
+
+func queryIstioP95Latency(client *PrometheusClient, sel istioMetricSelector) (float64, error) {
+	queries := []string{
+		fmt.Sprintf(`histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{%s}[5m])) by (le))`, sel.Selector),
+		fmt.Sprintf(`histogram_quantile(0.95, sum(rate(istio_request_duration_seconds_bucket{%s}[5m])) by (le)) * 1000`, sel.Selector),
+	}
+	for _, query := range queries {
+		value, series, err := client.QueryScalar(query)
+		if err != nil {
+			return 0, err
+		}
+		if series > 0 {
+			return value, nil
+		}
+	}
+	return 0, nil
+}
+
+func loadIstioDestinationMetrics(client *PrometheusClient, sel istioMetricSelector) ([]IstioDestinationMetric, error) {
+	requestQuery := fmt.Sprintf(`sum by (%s) (rate(istio_requests_total{%s}[5m]))`, sel.GroupLabel, sel.Selector)
+	errorQuery := fmt.Sprintf(`sum by (%s) (rate(istio_requests_total{%s,response_code=~"5.."}[5m]))`, sel.GroupLabel, sel.Selector)
+
+	requests, err := client.QueryVector(requestQuery, sel.GroupLabel)
 	if err != nil {
 		return nil, err
 	}
-	errors, err := client.QueryVector(errorQuery)
+	errors, err := client.QueryVector(errorQuery, sel.GroupLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -2062,10 +2140,6 @@ func loadIstioDestinationMetrics(client *PrometheusClient, destRegex string) ([]
 		return items[i].Destination < items[j].Destination
 	})
 	return items, nil
-}
-
-func istioDestinationRegex(appName string) string {
-	return appName + "-.*"
 }
 
 func destinationRuleMatchesApp(item k8sDestinationRule, appName string) bool {
@@ -2252,17 +2326,14 @@ func (c *PrometheusClient) QueryScalar(query string) (float64, int, error) {
 	return value, len(result.Data.Result), nil
 }
 
-func (c *PrometheusClient) QueryVector(query string) (map[string]float64, error) {
+func (c *PrometheusClient) QueryVector(query string, groupLabel string) (map[string]float64, error) {
 	result, err := c.query(query)
 	if err != nil {
 		return nil, err
 	}
 	values := make(map[string]float64)
 	for _, item := range result.Data.Result {
-		label := item.Metric["destination_service_name"]
-		if label == "" {
-			label = item.Metric["le"]
-		}
+		label := destinationLabelFromMetric(item.Metric, groupLabel)
 		if label == "" {
 			continue
 		}
@@ -2270,9 +2341,21 @@ func (c *PrometheusClient) QueryVector(query string) (map[string]float64, error)
 		if !ok {
 			continue
 		}
-		values[label] = value
+		values[label] += value
 	}
 	return values, nil
+}
+
+func destinationLabelFromMetric(metric map[string]string, preferred string) string {
+	if preferred != "" && metric[preferred] != "" {
+		return metric[preferred]
+	}
+	for _, key := range []string{"destination_service_name", "destination_service", "destination_workload", "destination_canonical_service"} {
+		if metric[key] != "" {
+			return metric[key]
+		}
+	}
+	return ""
 }
 
 func (c *PrometheusClient) query(query string) (prometheusQueryResponse, error) {

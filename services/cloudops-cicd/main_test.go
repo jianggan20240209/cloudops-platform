@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -314,5 +315,37 @@ func TestReleaseRecordFromDetailIncludesObservability(t *testing.T) {
 	}
 	if record.Verification.Observability.CanaryStage.Stage != "canary_25" {
 		t.Fatalf("canary stage = %q", record.Verification.Observability.CanaryStage.Stage)
+	}
+}
+
+func TestIstioMetricSelectors(t *testing.T) {
+	app := AppSummary{Name: "cloudops-gateway-rollout", Namespace: "cloudops-dev"}
+	selectors := istioMetricSelectors(app)
+	if len(selectors) < 4 {
+		t.Fatalf("selectors = %d, want at least 4", len(selectors))
+	}
+	if selectors[0].Selector != `destination_service_name=~"cloudops-gateway-rollout-.*"` {
+		t.Fatalf("first selector = %q", selectors[0].Selector)
+	}
+	foundIngress := false
+	for _, sel := range selectors {
+		if sel.Name == "ingress_to_service" {
+			foundIngress = true
+			if !strings.Contains(sel.Selector, "istio-ingressgateway") {
+				t.Fatalf("ingress selector = %q", sel.Selector)
+			}
+		}
+	}
+	if !foundIngress {
+		t.Fatal("ingress_to_service selector not found")
+	}
+}
+
+func TestDestinationLabelFromMetric(t *testing.T) {
+	label := destinationLabelFromMetric(map[string]string{
+		"destination_service": "cloudops-gateway-rollout-stable.cloudops-dev.svc.cluster.local",
+	}, "destination_service")
+	if label != "cloudops-gateway-rollout-stable.cloudops-dev.svc.cluster.local" {
+		t.Fatalf("label = %q", label)
 	}
 }
