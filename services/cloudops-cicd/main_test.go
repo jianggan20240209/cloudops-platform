@@ -144,6 +144,9 @@ func TestBuildReleaseSnapshotStoresNotReady(t *testing.T) {
 	if record.ID == releaseRecordID(app.Env, app.Name, app.CurrentTag) {
 		t.Fatalf("snapshot record ID should not overwrite base release record ID")
 	}
+	if !strings.Contains(record.ID, "-snapshot-") {
+		t.Fatalf("snapshot record ID = %q, want snapshot suffix", record.ID)
+	}
 }
 
 func TestReleaseRecordFromDetailIncludesTraffic(t *testing.T) {

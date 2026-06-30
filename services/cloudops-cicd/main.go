@@ -1137,7 +1137,9 @@ func buildReleaseDetail(app AppSummary) ReleaseDetail {
 func buildReleaseSnapshot(app AppSummary) ReleaseRecord {
 	detail := buildReleaseDetail(app)
 	record := releaseRecordFromDetail(app, detail)
-	record.ID = releaseRecordSnapshotID(record.Env, record.AppName, record.ImageTag, record.CreatedAt)
+	snapshotAt := firstNonEmpty(detail.GeneratedAt, time.Now().UTC().Format(time.RFC3339))
+	record.CreatedAt = snapshotAt
+	record.ID = releaseRecordSnapshotID(record.Env, record.AppName, record.ImageTag, snapshotAt)
 	record.Source = "snapshot"
 	return record
 }
