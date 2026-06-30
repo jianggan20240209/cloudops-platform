@@ -13,13 +13,13 @@ spec:
       imagePullPolicy: IfNotPresent
       env:
         - name: HTTP_PROXY
-          value: ""
+          value: "http://192.168.1.50:7890"
         - name: HTTPS_PROXY
-          value: ""
+          value: "http://192.168.1.50:7890"
         - name: http_proxy
-          value: ""
+          value: "http://192.168.1.50:7890"
         - name: https_proxy
-          value: ""
+          value: "http://192.168.1.50:7890"
         - name: NO_PROXY
           value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn"
         - name: no_proxy
@@ -73,10 +73,10 @@ spec:
         ARGOCD_APP_PATH = "dev/backend/deployment/go/base"
         ARGOCD_VALUES_FILE = "values/cloudops-cicd.yaml"
         CLOUDOPS_CICD_SERVER = "https://cloudops.jianggan.cn"
-        HTTP_PROXY = ""
-        HTTPS_PROXY = ""
-        http_proxy = ""
-        https_proxy = ""
+        HTTP_PROXY = "http://192.168.1.50:7890"
+        HTTPS_PROXY = "http://192.168.1.50:7890"
+        http_proxy = "http://192.168.1.50:7890"
+        https_proxy = "http://192.168.1.50:7890"
         NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn"
         no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn"
     }
@@ -87,6 +87,8 @@ spec:
                 sh '''
                   git --version
                   git config --global http.version HTTP/1.1
+                  git config --global http.proxy "http://192.168.1.50:7890"
+                  git config --global https.proxy "http://192.168.1.50:7890"
                   git config --global http.lowSpeedLimit 0
                   git config --global http.lowSpeedTime 999999
                   git config --global --list
