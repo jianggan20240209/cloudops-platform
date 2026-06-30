@@ -21,9 +21,9 @@ spec:
         - name: https_proxy
           value: "http://192.168.1.50:7890"
         - name: NO_PROXY
-          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn"
+          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.io,registry-1.docker.io,auth.docker.io,index.docker.io,production.cloudflare.docker.com,192.168.1.50,192.168.1.200"
         - name: no_proxy
-          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn"
+          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.io,registry-1.docker.io,auth.docker.io,index.docker.io,production.cloudflare.docker.com,192.168.1.50,192.168.1.200"
       command:
         - sleep
       args:
@@ -76,8 +76,8 @@ spec:
         HTTPS_PROXY = "http://192.168.1.50:7890"
         http_proxy = "http://192.168.1.50:7890"
         https_proxy = "http://192.168.1.50:7890"
-        NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn"
-        no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn"
+        NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.io,registry-1.docker.io,auth.docker.io,index.docker.io,production.cloudflare.docker.com,192.168.1.50,192.168.1.200"
+        no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.io,registry-1.docker.io,auth.docker.io,index.docker.io,production.cloudflare.docker.com,192.168.1.50,192.168.1.200"
     }
 
     stages {
@@ -132,12 +132,20 @@ EOF
                       echo "BUILD_TIME=${BUILD_TIME}"
 
                       /kaniko/executor \
+                        --image-download-retry=3 \
+                        --image-fs-extract-retry=3 \
                         --context "${WORKSPACE}/services/cloudops-gateway" \
                         --dockerfile "${WORKSPACE}/services/cloudops-gateway/Dockerfile" \
                         --destination "${IMAGE}:${IMAGE_TAG}" \
                         --build-arg VERSION="${IMAGE_TAG}" \
                         --build-arg COMMIT="${GIT_COMMIT_SHORT}" \
                         --build-arg BUILD_TIME="${BUILD_TIME}" \
+                        --build-arg HTTP_PROXY="${HTTP_PROXY}" \
+                        --build-arg HTTPS_PROXY="${HTTPS_PROXY}" \
+                        --build-arg NO_PROXY="${NO_PROXY}" \
+                        --build-arg http_proxy="${http_proxy}" \
+                        --build-arg https_proxy="${https_proxy}" \
+                        --build-arg no_proxy="${no_proxy}" \
                         --registry-certificate harbor-server.jianggan.cn=/kaniko/certs/jianggan-root-ca.crt
                     '''
                 }
