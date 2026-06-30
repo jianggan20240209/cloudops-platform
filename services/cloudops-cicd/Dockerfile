@@ -1,4 +1,5 @@
-FROM golang:1.23-alpine AS builder
+ARG GO_BUILD_IMAGE=harbor-server.jianggan.cn/base/golang:1.23-alpine
+FROM ${GO_BUILD_IMAGE} AS builder
 
 ARG VERSION=dev
 ARG COMMIT=unknown

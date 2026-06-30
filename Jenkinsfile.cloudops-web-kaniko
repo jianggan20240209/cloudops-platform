@@ -21,9 +21,9 @@ spec:
         - name: https_proxy
           value: "http://192.168.1.50:7890"
         - name: NO_PROXY
-          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn,docker.io,registry-1.docker.io,auth.docker.io,index.docker.io,production.cloudflare.docker.com,192.168.1.50,192.168.1.200"
+          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn,192.168.1.50,192.168.1.200"
         - name: no_proxy
-          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn,docker.io,registry-1.docker.io,auth.docker.io,index.docker.io,production.cloudflare.docker.com,192.168.1.50,192.168.1.200"
+          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn,192.168.1.50,192.168.1.200"
       command:
         - sleep
       args:
@@ -76,8 +76,8 @@ spec:
         HTTPS_PROXY = "http://192.168.1.50:7890"
         http_proxy = "http://192.168.1.50:7890"
         https_proxy = "http://192.168.1.50:7890"
-        NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn,docker.io,registry-1.docker.io,auth.docker.io,index.docker.io,production.cloudflare.docker.com,192.168.1.50,192.168.1.200"
-        no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn,docker.io,registry-1.docker.io,auth.docker.io,index.docker.io,production.cloudflare.docker.com,192.168.1.50,192.168.1.200"
+        NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn,192.168.1.50,192.168.1.200"
+        no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn,192.168.1.50,192.168.1.200"
     }
 
     stages {
