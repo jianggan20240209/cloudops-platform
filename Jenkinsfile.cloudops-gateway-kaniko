@@ -21,9 +21,9 @@ spec:
         - name: https_proxy
           value: "http://192.168.1.50:7890"
         - name: NO_PROXY
-          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,192.168.1.50,192.168.1.200"
+          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.m.daocloud.io,daocloud.io,192.168.1.50,192.168.1.200"
         - name: no_proxy
-          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,192.168.1.50,192.168.1.200"
+          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.m.daocloud.io,daocloud.io,192.168.1.50,192.168.1.200"
       command:
         - sleep
       args:
@@ -72,12 +72,13 @@ spec:
         ARGOCD_APP_NAME = "cloudops-gateway-dev"
         ARGOCD_APP_PATH = "dev/backend/deployment/go/base"
         ARGOCD_VALUES_FILE = "values/cloudops-gateway.yaml"
+        GO_BUILD_IMAGE = "docker.m.daocloud.io/library/golang:1.23-alpine"
         HTTP_PROXY = "http://192.168.1.50:7890"
         HTTPS_PROXY = "http://192.168.1.50:7890"
         http_proxy = "http://192.168.1.50:7890"
         https_proxy = "http://192.168.1.50:7890"
-        NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,192.168.1.50,192.168.1.200"
-        no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,192.168.1.50,192.168.1.200"
+        NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.m.daocloud.io,daocloud.io,192.168.1.50,192.168.1.200"
+        no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.m.daocloud.io,daocloud.io,192.168.1.50,192.168.1.200"
     }
 
     stages {
@@ -130,6 +131,7 @@ EOF
                       echo "IMAGE_TAG=${IMAGE_TAG}"
                       echo "GIT_COMMIT_SHORT=${GIT_COMMIT_SHORT}"
                       echo "BUILD_TIME=${BUILD_TIME}"
+                      echo "GO_BUILD_IMAGE=${GO_BUILD_IMAGE}"
 
                       /kaniko/executor \
                         --image-download-retry=3 \
@@ -137,6 +139,7 @@ EOF
                         --context "${WORKSPACE}/services/cloudops-gateway" \
                         --dockerfile "${WORKSPACE}/services/cloudops-gateway/Dockerfile" \
                         --destination "${IMAGE}:${IMAGE_TAG}" \
+                        --build-arg GO_BUILD_IMAGE="${GO_BUILD_IMAGE}" \
                         --build-arg VERSION="${IMAGE_TAG}" \
                         --build-arg COMMIT="${GIT_COMMIT_SHORT}" \
                         --build-arg BUILD_TIME="${BUILD_TIME}" \

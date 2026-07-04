@@ -1,9 +1,10 @@
-ARG GO_BUILD_IMAGE=harbor-server.jianggan.cn/base/golang:1.23-alpine
+ARG GO_BUILD_IMAGE=docker.m.daocloud.io/library/golang:1.23-alpine
 FROM ${GO_BUILD_IMAGE} AS builder
 
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
+ARG GOPROXY=https://goproxy.cn,direct
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
@@ -14,6 +15,7 @@ ARG no_proxy
 WORKDIR /src
 
 COPY go.mod go.sum ./
+ENV GOPROXY=${GOPROXY}
 RUN go mod download
 
 COPY main.go ./
