@@ -73,7 +73,7 @@ spec:
         ARGOCD_APP_PATH = "dev/backend/deployment/go/base"
         ARGOCD_VALUES_FILE = "values/cloudops-cicd.yaml"
         CLOUDOPS_CICD_SERVER = "https://cloudops.jianggan.cn"
-        GO_BUILD_IMAGE = "docker.m.daocloud.io/library/golang:1.23-alpine"
+        GO_BUILD_IMAGE = "harbor-server.jianggan.cn/library/golang:1.23-alpine"
         GOPROXY = "https://goproxy.cn,direct"
         HTTP_PROXY = "http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001"
         HTTPS_PROXY = "http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001"

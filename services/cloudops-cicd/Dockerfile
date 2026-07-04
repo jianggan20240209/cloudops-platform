@@ -1,4 +1,4 @@
-ARG GO_BUILD_IMAGE=docker.m.daocloud.io/library/golang:1.23-alpine
+ARG GO_BUILD_IMAGE=harbor-server.jianggan.cn/library/golang:1.23-alpine
 FROM ${GO_BUILD_IMAGE} AS builder
 
 ARG VERSION=dev
