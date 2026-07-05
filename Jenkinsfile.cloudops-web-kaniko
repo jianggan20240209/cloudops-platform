@@ -157,12 +157,31 @@ spec:
                   KUBECTL="${WORKSPACE}/bin/kubectl"
                   mkdir -p "${WORKSPACE}/bin"
                   if [ ! -x "${KUBECTL}" ]; then
-                    if [ -n "${HTTP_PROXY:-}" ]; then
-                      curl -fsSL --connect-timeout 30 --max-time 600 -x "${HTTP_PROXY}" -o "${KUBECTL}" \
-                        "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-                    else
-                      curl -fsSL --connect-timeout 30 --max-time 600 -o "${KUBECTL}" \
-                        "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+                    OK=no
+                    for spec in \
+                      "no|https://mirrors.aliyun.com/kubernetes/kubectl/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+                      "no|https://mirrors.huaweicloud.com/kubernetes/kubectl/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+                      "yes|https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+                    do
+                      use_proxy="${spec%%|*}"
+                      url="${spec#*|}"
+                      echo "Download kubectl: ${url} (proxy=${use_proxy})"
+                      rm -f "${KUBECTL}"
+                      if [ "${use_proxy}" = "yes" ] && [ -n "${PROXY_URL:-}" ]; then
+                        curl -fsSL --connect-timeout 30 --max-time 300 --retry 2 --retry-delay 3 \
+                          -x "${PROXY_URL}" -o "${KUBECTL}" "${url}" && OK=yes
+                      else
+                        curl -fsSL --connect-timeout 30 --max-time 300 --retry 2 --retry-delay 3 \
+                          -o "${KUBECTL}" "${url}" && OK=yes
+                      fi
+                      if [ "${OK}" = "yes" ]; then
+                        break
+                      fi
+                      echo "WARN: failed ${url}"
+                    done
+                    if [ "${OK}" != "yes" ]; then
+                      echo "ERROR: all kubectl download URLs failed"
+                      exit 1
                     fi
                     chmod +x "${KUBECTL}"
                   fi
