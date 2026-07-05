@@ -168,18 +168,41 @@ EOF
 
         stage('Update Argo CD Helm Parameter') {
             steps {
+                script {
+                    def patchInner = [
+                        spec: [
+                            source: [
+                                helm: [
+                                    parameters: [
+                                        [name: 'app.imageTag', value: env.IMAGE_TAG, forceString: true]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+                    def patchRequest = [
+                        name         : env.ARGOCD_APP_NAME,
+                        appNamespace : 'argocd',
+                        patch        : groovy.json.JsonOutput.toJson(patchInner),
+                        patchType    : 'merge'
+                    ]
+                    writeFile file: 'argocd-patch-request.json', text: groovy.json.JsonOutput.toJson(patchRequest)
+                }
                 withCredentials([string(credentialsId: 'argocd-auth-token', variable: 'ARGOCD_AUTH_TOKEN')]) {
                     container('curl') {
                         sh '''
                           set -eu
                           echo "Patch Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
-                          cat > /tmp/argocd-patch-request.json <<'PATCH_EOF'
-{"name":"${ARGOCD_APP_NAME}","appNamespace":"argocd","patch":"{\\"spec\\":{\\"source\\":{\\"helm\\":{\\"parameters\\":[{\\"name\\":\\"app.imageTag\\",\\"value\\":\\"${IMAGE_TAG}\\",\\"forceString\\":true}]}}}}","patchType":"merge"}
-PATCH_EOF
-                          curl -fksS -X PATCH "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
+                          HTTP_CODE="$(curl -ksS -o /tmp/argocd-patch-response.json -w '%{http_code}' \
+                            -X PATCH "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}" \
                             -H "Content-Type: application/json" \
-                            --data @/tmp/argocd-patch-request.json
+                            --data @"${WORKSPACE}/argocd-patch-request.json")"
+                          if [ "${HTTP_CODE}" -lt 200 ] || [ "${HTTP_CODE}" -ge 300 ]; then
+                            echo "Argo CD PATCH failed HTTP ${HTTP_CODE}:"
+                            cat /tmp/argocd-patch-response.json || true
+                            exit 1
+                          fi
 
                           APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
