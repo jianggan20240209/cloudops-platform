@@ -175,12 +175,13 @@ EOF
                   KUBECTL="${WORKSPACE}/bin/kubectl"
                   mkdir -p "${WORKSPACE}/bin"
                   if [ ! -x "${KUBECTL}" ]; then
-                    CURL_ARGS=(-fsSL --connect-timeout 30 --max-time 600 -o "${KUBECTL}")
                     if [ -n "${HTTP_PROXY:-}" ]; then
-                      CURL_ARGS+=(-x "${HTTP_PROXY}")
+                      curl -fsSL --connect-timeout 30 --max-time 600 -x "${HTTP_PROXY}" -o "${KUBECTL}" \
+                        "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+                    else
+                      curl -fsSL --connect-timeout 30 --max-time 600 -o "${KUBECTL}" \
+                        "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
                     fi
-                    curl "${CURL_ARGS[@]}" \
-                      "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
                     chmod +x "${KUBECTL}"
                   fi
                   "${KUBECTL}" version --client
