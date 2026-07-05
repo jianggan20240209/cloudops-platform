@@ -147,53 +147,16 @@ spec:
                     container('curl') {
                         sh '''
                           set -eu
-                          cat > /tmp/argocd-patch.json <<EOF
-{
-  "apiVersion": "argoproj.io/v1alpha1",
-  "kind": "Application",
-  "metadata": {
-    "name": "${ARGOCD_APP_NAME}",
-    "namespace": "argocd"
-  },
-  "spec": {
-    "project": "dev-frontend",
-    "source": {
-      "repoURL": "https://github.com/jianggan20240209/cloudops-gitops.git",
-      "targetRevision": "main",
-      "path": "${ARGOCD_APP_PATH}",
-      "helm": {
-        "valueFiles": ["${ARGOCD_VALUES_FILE}"],
-        "parameters": [
-          {
-            "name": "app.imageTag",
-            "value": "${IMAGE_TAG}",
-            "forceString": true
-          }
-        ]
-      }
-    },
-    "destination": {
-      "server": "https://kubernetes.default.svc",
-      "namespace": "cloudops-dev"
-    },
-    "syncPolicy": {
-      "automated": {
-        "prune": true,
-        "selfHeal": true
-      },
-      "syncOptions": [
-        "CreateNamespace=true"
-      ]
-    }
-  }
-}
-EOF
-
-                          echo "Patch Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
+                          echo "Fetch Argo CD application ${ARGOCD_APP_NAME}"
+                          APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
+                            -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
+                          BODY="$(printf '%s' "${APP_JSON}" | sed 's/,"status":.*//; s/,"operation":.*//')"
+                          BODY="$(printf '%s' "${BODY}" | sed 's/"name":"app.imageTag","value":"[^"]*"/"name":"app.imageTag","value":"'"${IMAGE_TAG}"'"/')"
+                          echo "PUT Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
                           curl -fksS -X PUT "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}" \
                             -H "Content-Type: application/json" \
-                            --data @/tmp/argocd-patch.json
+                            --data "${BODY}"
 
                           APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
