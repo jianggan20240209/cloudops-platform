@@ -75,19 +75,20 @@ spec:
         ARGOCD_APP_PATH = "dev/backend/deployment/go/base"
         ARGOCD_VALUES_FILE = "values/cloudops-gateway.yaml"
         GO_BUILD_IMAGE = "harbor-server.jianggan.cn/library/golang:1.23-alpine"
-        HTTP_PROXY = "http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001"
-        HTTPS_PROXY = "http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001"
-        http_proxy = "http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001"
-        https_proxy = "http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001"
+        PROXY_URL = 'http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001'
+        HTTP_PROXY = "${PROXY_URL}"
+        HTTPS_PROXY = "${PROXY_URL}"
+        http_proxy = "${PROXY_URL}"
+        https_proxy = "${PROXY_URL}"
         NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.m.daocloud.io,daocloud.io,8.222.223.161,192.168.1.50,192.168.1.200"
         no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.m.daocloud.io,daocloud.io,8.222.223.161,192.168.1.50,192.168.1.200"
         GIT_CONFIG_COUNT = '5'
         GIT_CONFIG_KEY_0 = 'http.version'
         GIT_CONFIG_VALUE_0 = 'HTTP/1.1'
         GIT_CONFIG_KEY_1 = 'http.proxy'
-        GIT_CONFIG_VALUE_1 = 'http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001'
+        GIT_CONFIG_VALUE_1 = "${PROXY_URL}"
         GIT_CONFIG_KEY_2 = 'https.proxy'
-        GIT_CONFIG_VALUE_2 = 'http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001'
+        GIT_CONFIG_VALUE_2 = "${PROXY_URL}"
         GIT_CONFIG_KEY_3 = 'http.lowSpeedLimit'
         GIT_CONFIG_VALUE_3 = '0'
         GIT_CONFIG_KEY_4 = 'http.lowSpeedTime'
@@ -100,10 +101,14 @@ spec:
                 sh '''
                   git --version
                   git config --global http.version HTTP/1.1
-                  git config --global http.proxy "${HTTP_PROXY}"
-                  git config --global https.proxy "${HTTPS_PROXY}"
+                  git config --global http.proxy "${PROXY_URL}"
+                  git config --global https.proxy "${PROXY_URL}"
                   git config --global http.lowSpeedLimit 0
                   git config --global http.lowSpeedTime 999999
+                  export HTTP_PROXY="${PROXY_URL}"
+                  export HTTPS_PROXY="${PROXY_URL}"
+                  export http_proxy="${PROXY_URL}"
+                  export https_proxy="${PROXY_URL}"
                   git config --global --list
                 '''
             }
@@ -111,9 +116,11 @@ spec:
 
         stage('Checkout') {
             steps {
-                git branch: 'main',
-                    credentialsId: 'github-user',
-                    url: 'https://github.com/jianggan20240209/cloudops-platform.git'
+                retry(3) {
+                    git branch: 'main',
+                        credentialsId: 'github-user',
+                        url: 'https://github.com/jianggan20240209/cloudops-platform.git'
+                }
             }
         }
 
@@ -175,8 +182,8 @@ EOF
                   KUBECTL="${WORKSPACE}/bin/kubectl"
                   mkdir -p "${WORKSPACE}/bin"
                   if [ ! -x "${KUBECTL}" ]; then
-                    if [ -n "${HTTP_PROXY:-}" ]; then
-                      curl -fsSL --connect-timeout 30 --max-time 600 -x "${HTTP_PROXY}" -o "${KUBECTL}" \
+                    if [ -n "${PROXY_URL:-}" ]; then
+                      curl -fsSL --connect-timeout 30 --max-time 600 -x "${PROXY_URL}" -o "${KUBECTL}" \
                         "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
                     else
                       curl -fsSL --connect-timeout 30 --max-time 600 -o "${KUBECTL}" \
