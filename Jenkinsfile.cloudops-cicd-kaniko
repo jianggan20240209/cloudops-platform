@@ -177,8 +177,8 @@ EOF
                         sh '''
                           set -eu
                           echo "Patch Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
-                          cat > /tmp/argocd-patch-request.json <<PATCH_EOF
-{"patch":"{\\"spec\\":{\\"source\\":{\\"helm\\":{\\"parameters\\":[{\\"name\\":\\"app.imageTag\\",\\"value\\":\\"${IMAGE_TAG}\\",\\"forceString\\":true}]}}}}","patchType":"merge"}
+                          cat > /tmp/argocd-patch-request.json <<'PATCH_EOF'
+{"name":"${ARGOCD_APP_NAME}","appNamespace":"argocd","patch":"{\\"spec\\":{\\"source\\":{\\"helm\\":{\\"parameters\\":[{\\"name\\":\\"app.imageTag\\",\\"value\\":\\"${IMAGE_TAG}\\",\\"forceString\\":true}]}}}}","patchType":"merge"}
 PATCH_EOF
                           curl -fksS -X PATCH "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}" \
