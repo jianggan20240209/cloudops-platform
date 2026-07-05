@@ -175,7 +175,11 @@ EOF
                   KUBECTL="${WORKSPACE}/bin/kubectl"
                   mkdir -p "${WORKSPACE}/bin"
                   if [ ! -x "${KUBECTL}" ]; then
-                    curl -fsSL -o "${KUBECTL}" \
+                    CURL_ARGS=(-fsSL --connect-timeout 30 --max-time 600 -o "${KUBECTL}")
+                    if [ -n "${HTTP_PROXY:-}" ]; then
+                      CURL_ARGS+=(-x "${HTTP_PROXY}")
+                    fi
+                    curl "${CURL_ARGS[@]}" \
                       "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
                     chmod +x "${KUBECTL}"
                   fi
@@ -186,12 +190,25 @@ EOF
 
         stage('Update Argo CD Helm Parameter') {
             steps {
+                script {
+                    writeFile file: 'argocd-image-tag-patch.json', text: groovy.json.JsonOutput.toJson([
+                        spec: [
+                            source: [
+                                helm: [
+                                    parameters: [
+                                        [name: 'app.imageTag', value: env.IMAGE_TAG, forceString: true]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ])
+                }
                 sh '''
                   set -eu
                   KUBECTL="${WORKSPACE}/bin/kubectl"
                   echo "Patch Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
                   "${KUBECTL}" -n argocd patch application "${ARGOCD_APP_NAME}" --type merge \
-                    -p "{\"spec\":{\"source\":{\"helm\":{\"parameters\":[{\"name\":\"app.imageTag\",\"value\":\"${IMAGE_TAG}\",\"forceString\":true}]}}}}"
+                    --patch-file "${WORKSPACE}/argocd-image-tag-patch.json"
 
                   CURRENT_TAG="$("${KUBECTL}" -n argocd get application "${ARGOCD_APP_NAME}" \
                     -o jsonpath='{.spec.source.helm.parameters[?(@.name=="app.imageTag")].value}')"
@@ -207,13 +224,14 @@ EOF
 
         stage('Sync Argo CD Application') {
             steps {
+                writeFile file: 'argocd-sync-patch.json', text: '{"operation":{"sync":{"revision":"main","prune":true}}}'
                 sh '''
                   set -eu
                   KUBECTL="${WORKSPACE}/bin/kubectl"
                   "${KUBECTL}" -n argocd annotate application "${ARGOCD_APP_NAME}" \
                     argocd.argoproj.io/refresh=hard --overwrite
                   "${KUBECTL}" -n argocd patch application "${ARGOCD_APP_NAME}" --type merge \
-                    -p '{"operation":{"sync":{"revision":"main","prune":true}}}'
+                    --patch-file "${WORKSPACE}/argocd-sync-patch.json"
                 '''
             }
         }
