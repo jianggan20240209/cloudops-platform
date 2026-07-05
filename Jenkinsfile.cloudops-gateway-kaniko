@@ -175,7 +175,7 @@ EOF
                           echo "Fetch Argo CD application ${ARGOCD_APP_NAME}"
                           APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
-                          BODY="$(printf '%s' "${APP_JSON}" | sed 's/,"status":.*//; s/,"operation":.*//')"
+                          BODY="$(printf '%s' "${APP_JSON}" | sed 's/,"status":{.*}$//')"
                           BODY="$(printf '%s' "${BODY}" | sed 's/"name":"app.imageTag","value":"[^"]*"/"name":"app.imageTag","value":"'"${IMAGE_TAG}"'"/')"
                           echo "PUT Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
                           curl -fksS -X PUT "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
