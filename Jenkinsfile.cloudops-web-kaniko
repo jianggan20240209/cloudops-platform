@@ -147,20 +147,16 @@ spec:
                     container('curl') {
                         sh '''
                           set -eu
-                          echo "Fetch Argo CD application ${ARGOCD_APP_NAME}"
-                          APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
-                            -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
-                          BODY="$(printf '%s' "${APP_JSON}" | sed 's/,"status":{.*}$//')"
-                          BODY="$(printf '%s' "${BODY}" | sed 's/"name":"app.imageTag","value":"[^"]*"/"name":"app.imageTag","value":"'"${IMAGE_TAG}"'"/')"
-                          echo "PUT Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
-                          curl -fksS -X PUT "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
+                          echo "Patch Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
+                          PATCH_BODY='{"patch":"{\"spec\":{\"source\":{\"helm\":{\"parameters\":[{\"name\":\"app.imageTag\",\"value\":\"'"${IMAGE_TAG}"'\",\"forceString\":true}]}}}}","patchType":"merge"}'
+                          curl -fksS -X PATCH "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}" \
                             -H "Content-Type: application/json" \
-                            --data "${BODY}"
+                            --data "${PATCH_BODY}"
 
                           APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
-                          SPEC_JSON="$(printf '%s' "${APP_JSON}" | sed 's/,"status":.*//')"
+                          SPEC_JSON="$(printf '%s' "${APP_JSON}" | sed 's/,"status":{.*}$//')"
                           if printf '%s' "${SPEC_JSON}" | grep -q '"name":"app.imageTag"' && \
                              printf '%s' "${SPEC_JSON}" | grep -q '"value":"'"${IMAGE_TAG}"'"'; then
                             echo "Argo CD app.imageTag updated to ${IMAGE_TAG}"
