@@ -100,22 +100,9 @@ spec:
 
         stage('Checkout') {
             steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    userRemoteConfigs: [[
-                        credentialsId: 'github-user',
-                        url: 'https://github.com/jianggan20240209/cloudops-platform.git'
-                    ]],
-                    extensions: [
-                        [$class: 'CloneOption', depth: 1, shallow: true, timeout: 30],
-                        [$class: 'GitConfigOption', key: 'http.version', value: 'HTTP/1.1'],
-                        [$class: 'GitConfigOption', key: 'http.proxy', value: "${HTTP_PROXY}"],
-                        [$class: 'GitConfigOption', key: 'https.proxy', value: "${HTTPS_PROXY}"],
-                        [$class: 'GitConfigOption', key: 'http.lowSpeedLimit', value: '0'],
-                        [$class: 'GitConfigOption', key: 'http.lowSpeedTime', value: '999999'],
-                    ]
-                ])
+                git branch: 'main',
+                    credentialsId: 'github-user',
+                    url: 'https://github.com/jianggan20240209/cloudops-platform.git'
             }
         }
 

@@ -78,6 +78,17 @@ spec:
         https_proxy = "http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001"
         NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn,docker.m.daocloud.io,daocloud.io,8.222.223.161,192.168.1.50,192.168.1.200"
         no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,demo.jianggan.cn,docker.m.daocloud.io,daocloud.io,8.222.223.161,192.168.1.50,192.168.1.200"
+        GIT_CONFIG_COUNT = '5'
+        GIT_CONFIG_KEY_0 = 'http.version'
+        GIT_CONFIG_VALUE_0 = 'HTTP/1.1'
+        GIT_CONFIG_KEY_1 = 'http.proxy'
+        GIT_CONFIG_VALUE_1 = 'http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001'
+        GIT_CONFIG_KEY_2 = 'https.proxy'
+        GIT_CONFIG_VALUE_2 = 'http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001'
+        GIT_CONFIG_KEY_3 = 'http.lowSpeedLimit'
+        GIT_CONFIG_VALUE_3 = '0'
+        GIT_CONFIG_KEY_4 = 'http.lowSpeedTime'
+        GIT_CONFIG_VALUE_4 = '999999'
     }
 
     stages {
@@ -97,22 +108,9 @@ spec:
 
         stage('Checkout') {
             steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    userRemoteConfigs: [[
-                        credentialsId: 'github-user',
-                        url: 'https://github.com/jianggan20240209/cloudops-platform.git'
-                    ]],
-                    extensions: [
-                        [$class: 'CloneOption', depth: 1, shallow: true, timeout: 30],
-                        [$class: 'GitConfigOption', key: 'http.version', value: 'HTTP/1.1'],
-                        [$class: 'GitConfigOption', key: 'http.proxy', value: "${HTTP_PROXY}"],
-                        [$class: 'GitConfigOption', key: 'https.proxy', value: "${HTTPS_PROXY}"],
-                        [$class: 'GitConfigOption', key: 'http.lowSpeedLimit', value: '0'],
-                        [$class: 'GitConfigOption', key: 'http.lowSpeedTime', value: '999999'],
-                    ]
-                ])
+                git branch: 'main',
+                    credentialsId: 'github-user',
+                    url: 'https://github.com/jianggan20240209/cloudops-platform.git'
             }
         }
 
