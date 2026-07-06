@@ -69,7 +69,7 @@ spec:
     environment {
         IMAGE = "harbor-server.jianggan.cn/cloudops/cloudops-cicd"
         IMAGE_TAG = "main-${BUILD_NUMBER}"
-        KUBECTL_VERSION = "v1.30.4"
+        K8S_ARGOCD_APP_API = "https://kubernetes.default.svc/apis/argoproj.io/v1alpha1/namespaces/argocd/applications/cloudops-cicd-dev"
         ARGOCD_SERVER = "https://argocd.jianggan.cn"
         ARGOCD_APP_NAME = "cloudops-cicd-dev"
         ARGOCD_APP_PATH = "dev/backend/deployment/go/base"
@@ -179,46 +179,6 @@ EOF
             }
         }
 
-        stage('Prepare kubectl') {
-            steps {
-                sh '''
-                  set -eu
-                  KUBECTL="${WORKSPACE}/bin/kubectl"
-                  mkdir -p "${WORKSPACE}/bin"
-                  if [ ! -x "${KUBECTL}" ]; then
-                    OK=no
-                    for spec in \
-                      "no|https://mirrors.aliyun.com/kubernetes/kubectl/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
-                      "no|https://mirrors.huaweicloud.com/kubernetes/kubectl/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
-                      "yes|https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-                    do
-                      use_proxy="${spec%%|*}"
-                      url="${spec#*|}"
-                      echo "Download kubectl: ${url} (proxy=${use_proxy})"
-                      rm -f "${KUBECTL}"
-                      if [ "${use_proxy}" = "yes" ] && [ -n "${PROXY_URL:-}" ]; then
-                        curl -fsSL --connect-timeout 30 --max-time 300 --retry 2 --retry-delay 3 \
-                          -x "${PROXY_URL}" -o "${KUBECTL}" "${url}" && OK=yes
-                      else
-                        curl -fsSL --connect-timeout 30 --max-time 300 --retry 2 --retry-delay 3 \
-                          -o "${KUBECTL}" "${url}" && OK=yes
-                      fi
-                      if [ "${OK}" = "yes" ]; then
-                        break
-                      fi
-                      echo "WARN: failed ${url}"
-                    done
-                    if [ "${OK}" != "yes" ]; then
-                      echo "ERROR: all kubectl download URLs failed"
-                      exit 1
-                    fi
-                    chmod +x "${KUBECTL}"
-                  fi
-                  "${KUBECTL}" version --client
-                '''
-            }
-        }
-
         stage('Update Argo CD Helm Parameter') {
             steps {
                 script {
@@ -234,71 +194,96 @@ EOF
                         ]
                     ])
                 }
-                sh '''
-                  set -eu
-                  KUBECTL="${WORKSPACE}/bin/kubectl"
-                  echo "Patch Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
-                  "${KUBECTL}" -n argocd patch application "${ARGOCD_APP_NAME}" --type merge \
-                    --patch-file "${WORKSPACE}/argocd-image-tag-patch.json"
+                container('curl') {
+                    sh '''
+                      set -eu
+                      K8S_SA_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+                      K8S_SA_CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+                      echo "Patch Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
+                      curl -fsS --cacert "${K8S_SA_CA}" \
+                        -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
+                        -H "Content-Type: application/merge-patch+json" \
+                        -X PATCH \
+                        --data @"${WORKSPACE}/argocd-image-tag-patch.json" \
+                        "${K8S_ARGOCD_APP_API}"
 
-                  CURRENT_TAG="$("${KUBECTL}" -n argocd get application "${ARGOCD_APP_NAME}" \
-                    -o jsonpath='{.spec.source.helm.parameters[?(@.name=="app.imageTag")].value}')"
-                  if [ "${CURRENT_TAG}" != "${IMAGE_TAG}" ]; then
-                    echo "Failed to update app.imageTag: expected ${IMAGE_TAG}, got ${CURRENT_TAG:-<empty>}"
-                    "${KUBECTL}" -n argocd get application "${ARGOCD_APP_NAME}" -o yaml
-                    exit 1
-                  fi
-                  echo "Argo CD app.imageTag updated to ${IMAGE_TAG}"
-                '''
+                      APP_JSON="$(curl -fsS --cacert "${K8S_SA_CA}" \
+                        -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
+                        "${K8S_ARGOCD_APP_API}")"
+                      CURRENT_TAG="$(printf '%s' "${APP_JSON}" | sed -n 's/.*"name":"app.imageTag","value":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                      if [ "${CURRENT_TAG}" != "${IMAGE_TAG}" ]; then
+                        echo "Failed to update app.imageTag: expected ${IMAGE_TAG}, got ${CURRENT_TAG:-<empty>}"
+                        printf '%s\n' "${APP_JSON}"
+                        exit 1
+                      fi
+                      echo "Argo CD app.imageTag updated to ${IMAGE_TAG}"
+                    '''
+                }
             }
         }
 
         stage('Sync Argo CD Application') {
             steps {
+                writeFile file: 'argocd-refresh-patch.json', text: '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'
                 writeFile file: 'argocd-sync-patch.json', text: '{"operation":{"sync":{"revision":"main","prune":true}}}'
-                sh '''
-                  set -eu
-                  KUBECTL="${WORKSPACE}/bin/kubectl"
-                  "${KUBECTL}" -n argocd annotate application "${ARGOCD_APP_NAME}" \
-                    argocd.argoproj.io/refresh=hard --overwrite
-                  "${KUBECTL}" -n argocd patch application "${ARGOCD_APP_NAME}" --type merge \
-                    --patch-file "${WORKSPACE}/argocd-sync-patch.json"
-                '''
+                container('curl') {
+                    sh '''
+                      set -eu
+                      K8S_SA_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+                      K8S_SA_CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+                      curl -fsS --cacert "${K8S_SA_CA}" \
+                        -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
+                        -H "Content-Type: application/merge-patch+json" \
+                        -X PATCH \
+                        --data @"${WORKSPACE}/argocd-refresh-patch.json" \
+                        "${K8S_ARGOCD_APP_API}"
+                      curl -fsS --cacert "${K8S_SA_CA}" \
+                        -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
+                        -H "Content-Type: application/merge-patch+json" \
+                        -X PATCH \
+                        --data @"${WORKSPACE}/argocd-sync-patch.json" \
+                        "${K8S_ARGOCD_APP_API}"
+                    '''
+                }
             }
         }
 
         stage('Wait Argo CD Healthy') {
             steps {
-                sh '''
-                  set -eu
-                  KUBECTL="${WORKSPACE}/bin/kubectl"
-                  for i in $(seq 1 60); do
-                    SYNC_STATUS="$("${KUBECTL}" -n argocd get application "${ARGOCD_APP_NAME}" \
-                      -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
-                    HEALTH_STATUS="$("${KUBECTL}" -n argocd get application "${ARGOCD_APP_NAME}" \
-                      -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
-                    OPERATION_PHASE="$("${KUBECTL}" -n argocd get application "${ARGOCD_APP_NAME}" \
-                      -o jsonpath='{.status.operationState.phase}' 2>/dev/null || true)"
+                container('curl') {
+                    sh '''
+                      set -eu
+                      K8S_SA_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+                      K8S_SA_CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+                      for i in $(seq 1 60); do
+                        APP_JSON="$(curl -fsS --cacert "${K8S_SA_CA}" \
+                          -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
+                          "${K8S_ARGOCD_APP_API}")"
 
-                    echo "attempt=${i} sync=${SYNC_STATUS:-unknown} health=${HEALTH_STATUS:-unknown} operation=${OPERATION_PHASE:-none}"
+                        SYNC_STATUS="$(printf '%s' "${APP_JSON}" | sed -n 's/.*"sync":{"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                        HEALTH_STATUS="$(printf '%s' "${APP_JSON}" | sed -n 's/.*"health":{"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                        OPERATION_PHASE="$(printf '%s' "${APP_JSON}" | sed -n 's/.*"operationState":{"phase":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
 
-                    if [ "${SYNC_STATUS}" = "Synced" ] && [ "${HEALTH_STATUS}" = "Healthy" ]; then
-                      echo "Argo CD application ${ARGOCD_APP_NAME} synced and healthy"
-                      exit 0
-                    fi
+                        echo "attempt=${i} sync=${SYNC_STATUS:-unknown} health=${HEALTH_STATUS:-unknown} operation=${OPERATION_PHASE:-none}"
 
-                    if [ "${OPERATION_PHASE}" = "Failed" ] || [ "${OPERATION_PHASE}" = "Error" ]; then
-                      "${KUBECTL}" -n argocd get application "${ARGOCD_APP_NAME}" -o yaml
-                      echo "Argo CD application ${ARGOCD_APP_NAME} sync failed"
+                        if [ "${SYNC_STATUS}" = "Synced" ] && [ "${HEALTH_STATUS}" = "Healthy" ]; then
+                          echo "Argo CD application ${ARGOCD_APP_NAME} synced and healthy"
+                          exit 0
+                        fi
+
+                        if [ "${OPERATION_PHASE}" = "Failed" ] || [ "${OPERATION_PHASE}" = "Error" ]; then
+                          printf '%s\n' "${APP_JSON}"
+                          echo "Argo CD application ${ARGOCD_APP_NAME} sync failed"
+                          exit 1
+                        fi
+
+                        sleep 5
+                      done
+
+                      echo "Timed out waiting for ${ARGOCD_APP_NAME} to become Synced/Healthy"
                       exit 1
-                    fi
-
-                    sleep 5
-                  done
-
-                  echo "Timed out waiting for ${ARGOCD_APP_NAME} to become Synced/Healthy"
-                  exit 1
-                '''
+                    '''
+                }
             }
         }
 
