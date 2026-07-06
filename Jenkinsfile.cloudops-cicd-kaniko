@@ -210,8 +210,8 @@ EOF
                       APP_JSON="$(curl -fsS --cacert "${K8S_SA_CA}" \
                         -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
                         "${K8S_ARGOCD_APP_API}")"
-                      SPEC_JSON="$(printf '%s' "${APP_JSON}" | sed 's/"status":{.*$//')"
-                      CURRENT_TAG="$(printf '%s' "${SPEC_JSON}" | tr -d '\\n\\r\\t ' | sed -n 's/.*"name":"app.imageTag","value":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                      APP_COMPACT="$(printf '%s' "${APP_JSON}" | tr -d '\\n\\r\\t ')"
+                      CURRENT_TAG="$(printf '%s' "${APP_COMPACT}" | sed 's/"status":{.*$//' | sed -n 's/.*"name":"app.imageTag","value":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
                       if [ "${CURRENT_TAG}" != "${IMAGE_TAG}" ]; then
                         echo "Failed to update app.imageTag: expected ${IMAGE_TAG}, got ${CURRENT_TAG:-<empty>}"
                         printf '%s\n' "${APP_JSON}"
@@ -262,8 +262,8 @@ EOF
                           "${K8S_ARGOCD_APP_API}")"
 
                         APP_COMPACT="$(printf '%s' "${APP_JSON}" | tr -d '\\n\\r\\t ')"
-                        SYNC_STATUS="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"sync":{"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-                        HEALTH_STATUS="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"health":{"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                        SYNC_STATUS="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"sync":{.*"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                        HEALTH_STATUS="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"health":{.*"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
                         OPERATION_PHASE="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"operationState":{"phase":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
 
                         echo "attempt=${i} sync=${SYNC_STATUS:-unknown} health=${HEALTH_STATUS:-unknown} operation=${OPERATION_PHASE:-none}"
@@ -299,9 +299,10 @@ EOF
 
                           APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
-                          SYNC_STATUS="$(echo "${APP_JSON}" | sed -n 's/.*"sync":{"status":"\\([^"]*\\)".*/\\1/p')"
-                          HEALTH_STATUS="$(echo "${APP_JSON}" | sed -n 's/.*"health":{"status":"\\([^"]*\\)".*/\\1/p')"
-                          ARGOCD_REVISION="$(echo "${APP_JSON}" | sed -n 's/.*"revision":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                          APP_COMPACT="$(printf '%s' "${APP_JSON}" | tr -d '\\n\\r\\t ')"
+                          SYNC_STATUS="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"sync":{.*"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                          HEALTH_STATUS="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"health":{.*"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                          ARGOCD_REVISION="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"sync":{.*"revision":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
                           VERIFIED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
                           cat > /tmp/release-record.json <<EOF
