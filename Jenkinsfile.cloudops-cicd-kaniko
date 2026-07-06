@@ -210,7 +210,8 @@ EOF
                       APP_JSON="$(curl -fsS --cacert "${K8S_SA_CA}" \
                         -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
                         "${K8S_ARGOCD_APP_API}")"
-                      CURRENT_TAG="$(printf '%s' "${APP_JSON}" | sed -n 's/.*"name":"app.imageTag","value":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                      SPEC_JSON="$(printf '%s' "${APP_JSON}" | sed 's/"status":{.*$//')"
+                      CURRENT_TAG="$(printf '%s' "${SPEC_JSON}" | tr -d '\\n\\r\\t ' | sed -n 's/.*"name":"app.imageTag","value":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
                       if [ "${CURRENT_TAG}" != "${IMAGE_TAG}" ]; then
                         echo "Failed to update app.imageTag: expected ${IMAGE_TAG}, got ${CURRENT_TAG:-<empty>}"
                         printf '%s\n' "${APP_JSON}"
@@ -260,9 +261,10 @@ EOF
                           -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
                           "${K8S_ARGOCD_APP_API}")"
 
-                        SYNC_STATUS="$(printf '%s' "${APP_JSON}" | sed -n 's/.*"sync":{"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-                        HEALTH_STATUS="$(printf '%s' "${APP_JSON}" | sed -n 's/.*"health":{"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-                        OPERATION_PHASE="$(printf '%s' "${APP_JSON}" | sed -n 's/.*"operationState":{"phase":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                        APP_COMPACT="$(printf '%s' "${APP_JSON}" | tr -d '\\n\\r\\t ')"
+                        SYNC_STATUS="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"sync":{"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                        HEALTH_STATUS="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"health":{"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                        OPERATION_PHASE="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"operationState":{"phase":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
 
                         echo "attempt=${i} sync=${SYNC_STATUS:-unknown} health=${HEALTH_STATUS:-unknown} operation=${OPERATION_PHASE:-none}"
 
