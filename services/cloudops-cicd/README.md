@@ -12,6 +12,8 @@
 
 当前版本会优先从 Argo CD API 读取实时 Application 状态，可从 Harbor API 查询镜像 tag 列表，并可从 Prometheus API 查询基础运行指标；如果没有配置对应依赖或调用失败，会回退到静态示例数据。后续再逐步接入 Jenkins API。
 
+访问日志为结构化 JSON（`trace_id` / `request_id`），与 gateway 约定一致（Day 45）；探针路径不打访问日志。
+
 ## 本地目录
 
 ```text

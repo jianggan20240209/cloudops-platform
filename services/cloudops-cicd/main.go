@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +23,8 @@ import (
 
 	_ "github.com/lib/pq"
 )
+
+const appName = "cloudops-cicd"
 
 var (
 	version     = "dev"
@@ -598,9 +602,14 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("cloudops-cicd starting addr=%s version=%s commit=%s", addr, version, commit)
+	logJSON("info", "service_starting", map[string]any{
+		"addr":    addr,
+		"version": version,
+		"commit":  commit,
+	})
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("cloudops-cicd stopped: %v", err)
+		logJSON("error", "service_stopped", map[string]any{"error": err.Error()})
+		os.Exit(1)
 	}
 }
 
@@ -2491,16 +2500,107 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		log.Printf("failed to write response: %v", err)
+		logJSON("error", "write_response_failed", map[string]any{"error": err.Error()})
 	}
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
 }
 
 func requestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		next.ServeHTTP(w, r)
-		log.Printf("method=%s path=%s remote=%s duration_ms=%d", r.Method, r.URL.Path, r.RemoteAddr, time.Since(start).Milliseconds())
+		traceID, requestID := resolveTraceIDs(r)
+		w.Header().Set("X-Request-Id", requestID)
+		w.Header().Set("X-Trace-Id", traceID)
+
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+
+		if isProbePath(r.URL.Path) {
+			return
+		}
+
+		logJSON("info", "http_request", map[string]any{
+			"method":      r.Method,
+			"path":        r.URL.Path,
+			"remote":      r.RemoteAddr,
+			"status":      rec.status,
+			"duration_ms": time.Since(start).Milliseconds(),
+			"trace_id":    traceID,
+			"request_id":  requestID,
+		})
 	})
+}
+
+func isProbePath(path string) bool {
+	switch path {
+	case "/healthz", "/readyz", "/api/healthz", "/api/readyz", "/metrics":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveTraceIDs(r *http.Request) (traceID, requestID string) {
+	requestID = firstNonEmpty(
+		r.Header.Get("X-Request-Id"),
+		r.Header.Get("X-Request-ID"),
+	)
+	traceID = firstNonEmpty(
+		r.Header.Get("X-Trace-Id"),
+		r.Header.Get("X-Trace-ID"),
+		traceIDFromTraceparent(r.Header.Get("traceparent")),
+		requestID,
+	)
+	if requestID == "" {
+		requestID = newID()
+	}
+	if traceID == "" {
+		traceID = requestID
+	}
+	return traceID, requestID
+}
+
+func traceIDFromTraceparent(value string) string {
+	parts := strings.Split(strings.TrimSpace(value), "-")
+	if len(parts) >= 2 && len(parts[1]) == 32 {
+		return parts[1]
+	}
+	return ""
+}
+
+func newID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+func logJSON(level, msg string, fields map[string]any) {
+	payload := map[string]any{
+		"level": level,
+		"msg":   msg,
+		"app":   appName,
+		"time":  time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	for k, v := range fields {
+		payload[k] = v
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf(`{"level":"error","msg":"log_marshal_failed","app":%q,"error":%q}`, appName, err.Error())
+		return
+	}
+	fmt.Fprintln(os.Stdout, string(b))
 }
 
 func env(key, fallback string) string {

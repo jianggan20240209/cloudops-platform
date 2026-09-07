@@ -10,6 +10,7 @@
 - Argo CD / GitOps 部署到 `cloudops-dev`
 - Ingress `/api` 路由到后端服务
 - Prometheus 通过 ServiceMonitor 抓取 `/metrics`
+- 结构化 JSON 访问日志（`trace_id` / `request_id`，对齐 Day 45 / ADR-002）
 
 ## 本地目录
 
@@ -31,6 +32,13 @@ services/cloudops-gateway
 | `/api/readyz` | Ingress `/api` 前缀下的就绪检查 |
 | `/api/v1/version` | 服务版本信息 |
 | `/metrics` | Prometheus 指标 |
+
+## 日志约定（Day 45）
+
+- 访问日志一行一条 JSON，字段含：`level`、`msg`、`app`、`trace_id`、`request_id`、`method`、`path`、`status`、`duration_ms`
+- 优先透传请求头：`X-Request-Id`、`X-Trace-Id`、`traceparent`；缺失则服务端生成
+- 响应回写：`X-Request-Id`、`X-Trace-Id`
+- `/healthz`、`/readyz`、`/metrics` 不打访问日志（减探针噪声）
 
 ## 镜像名称
 
