@@ -246,17 +246,27 @@ EOF
                             s = substr(s, 1, p - 1) substr(s, i)
                           }
                           sync = ""; health = ""; phase = ""; cerr = ""
-                          if (match(s, /"sync":\{/)) {
-                            r = substr(s, RSTART)
+                          # Prefer index() markers; avoid backslash-brace which breaks Groovy triple-quotes.
+                          p = index(s, "\"sync\":")
+                          if (p > 0) {
+                            r = substr(s, p)
                             if (match(r, /"status":"[^"]+"/)) {
                               sync = substr(r, RSTART + 10, RLENGTH - 11)
                             }
                           }
-                          if (match(s, /"health":\{"status":"[^"]+"/)) {
-                            health = substr(s, RSTART + 19, RLENGTH - 20)
+                          p = index(s, "\"health\":")
+                          if (p > 0) {
+                            r = substr(s, p)
+                            sp = index(r, "\"status\":\"")
+                            if (sp > 0) {
+                              r2 = substr(r, sp + 10)
+                              q = index(r2, "\"")
+                              if (q > 0) health = substr(r2, 1, q - 1)
+                            }
                           }
-                          if (match(s, /"operationState":\{/)) {
-                            r = substr(s, RSTART)
+                          p = index(s, "\"operationState\":")
+                          if (p > 0) {
+                            r = substr(s, p)
                             if (match(r, /"phase":"[^"]+"/)) {
                               phase = substr(r, RSTART + 9, RLENGTH - 10)
                             }
@@ -343,8 +353,9 @@ EOF
                               s = substr(s, 1, p - 1) substr(s, i)
                             }
                             sync = ""; health = ""; rev = ""
-                            if (match(s, /"sync":\{/)) {
-                              r = substr(s, RSTART)
+                            p = index(s, "\"sync\":")
+                            if (p > 0) {
+                              r = substr(s, p)
                               if (match(r, /"status":"[^"]+"/)) {
                                 sync = substr(r, RSTART + 10, RLENGTH - 11)
                               }
@@ -352,8 +363,15 @@ EOF
                                 rev = substr(r, RSTART + 12, RLENGTH - 13)
                               }
                             }
-                            if (match(s, /"health":\{"status":"[^"]+"/)) {
-                              health = substr(s, RSTART + 19, RLENGTH - 20)
+                            p = index(s, "\"health\":")
+                            if (p > 0) {
+                              r = substr(s, p)
+                              sp = index(r, "\"status\":\"")
+                              if (sp > 0) {
+                                r2 = substr(r, sp + 10)
+                                q = index(r2, "\"")
+                                if (q > 0) health = substr(r2, 1, q - 1)
+                              }
                             }
                             printf "SYNC=%s\\nHEALTH=%s\\nREV=%s\\n", sync, health, rev
                           }')"
