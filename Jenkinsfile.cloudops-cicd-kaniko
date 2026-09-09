@@ -231,11 +231,14 @@ EOF
                       # before reading sync/health. Truncating at the first resources key wrongly
                       # drops status.sync / status.health and leaves SYNC_STATUS empty forever.
                       parse_argocd_app_status() {
+                        # Groovy ''' strips \\ before "; build quote via sprintf to keep awk strings valid.
                         printf '%s' "$1" | tr -d '\\n\\r\\t ' | awk '
+                        BEGIN { dq = sprintf("%c", 34) }
                         {
                           s = $0
-                          while ((p = index(s, "\"resources\":[")) > 0) {
-                            i = p + 14
+                          key = dq "resources" dq ":["
+                          while ((p = index(s, key)) > 0) {
+                            i = p + length(key)
                             depth = 1
                             while (i <= length(s) && depth > 0) {
                               c = substr(s, i, 1)
@@ -246,25 +249,24 @@ EOF
                             s = substr(s, 1, p - 1) substr(s, i)
                           }
                           sync = ""; health = ""; phase = ""; cerr = ""
-                          # Prefer index() markers; avoid backslash-brace which breaks Groovy triple-quotes.
-                          p = index(s, "\"sync\":")
+                          p = index(s, dq "sync" dq ":")
                           if (p > 0) {
                             r = substr(s, p)
                             if (match(r, /"status":"[^"]+"/)) {
                               sync = substr(r, RSTART + 10, RLENGTH - 11)
                             }
                           }
-                          p = index(s, "\"health\":")
+                          p = index(s, dq "health" dq ":")
                           if (p > 0) {
                             r = substr(s, p)
-                            sp = index(r, "\"status\":\"")
+                            sp = index(r, dq "status" dq ":" dq)
                             if (sp > 0) {
                               r2 = substr(r, sp + 10)
-                              q = index(r2, "\"")
+                              q = index(r2, dq)
                               if (q > 0) health = substr(r2, 1, q - 1)
                             }
                           }
-                          p = index(s, "\"operationState\":")
+                          p = index(s, dq "operationState" dq ":")
                           if (p > 0) {
                             r = substr(s, p)
                             if (match(r, /"phase":"[^"]+"/)) {
@@ -339,10 +341,12 @@ EOF
 
                           # Same resources-array stripping as Wait Argo CD Healthy (avoid false empty sync/health).
                           PARSED="$(printf '%s' "${APP_JSON}" | tr -d '\\n\\r\\t ' | awk '
+                          BEGIN { dq = sprintf("%c", 34) }
                           {
                             s = $0
-                            while ((p = index(s, "\"resources\":[")) > 0) {
-                              i = p + 14
+                            key = dq "resources" dq ":["
+                            while ((p = index(s, key)) > 0) {
+                              i = p + length(key)
                               depth = 1
                               while (i <= length(s) && depth > 0) {
                                 c = substr(s, i, 1)
@@ -353,7 +357,7 @@ EOF
                               s = substr(s, 1, p - 1) substr(s, i)
                             }
                             sync = ""; health = ""; rev = ""
-                            p = index(s, "\"sync\":")
+                            p = index(s, dq "sync" dq ":")
                             if (p > 0) {
                               r = substr(s, p)
                               if (match(r, /"status":"[^"]+"/)) {
@@ -363,13 +367,13 @@ EOF
                                 rev = substr(r, RSTART + 12, RLENGTH - 13)
                               }
                             }
-                            p = index(s, "\"health\":")
+                            p = index(s, dq "health" dq ":")
                             if (p > 0) {
                               r = substr(s, p)
-                              sp = index(r, "\"status\":\"")
+                              sp = index(r, dq "status" dq ":" dq)
                               if (sp > 0) {
                                 r2 = substr(r, sp + 10)
-                                q = index(r2, "\"")
+                                q = index(r2, dq)
                                 if (q > 0) health = substr(r2, 1, q - 1)
                               }
                             }
