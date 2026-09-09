@@ -226,26 +226,72 @@ EOF
                       set -eu
                       K8S_SA_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
                       K8S_SA_CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+
+                      # Strip every "resources":[...] array (status.resources and syncResult.resources)
+                      # before reading sync/health. Truncating at the first resources key wrongly
+                      # drops status.sync / status.health and leaves SYNC_STATUS empty forever.
+                      parse_argocd_app_status() {
+                        printf '%s' "$1" | tr -d '\\n\\r\\t ' | awk '
+                        {
+                          s = $0
+                          while ((p = index(s, "\"resources\":[")) > 0) {
+                            i = p + 14
+                            depth = 1
+                            while (i <= length(s) && depth > 0) {
+                              c = substr(s, i, 1)
+                              if (c == "[") depth++
+                              else if (c == "]") depth--
+                              i++
+                            }
+                            s = substr(s, 1, p - 1) substr(s, i)
+                          }
+                          sync = ""; health = ""; phase = ""; cerr = ""
+                          if (match(s, /"sync":\{/)) {
+                            r = substr(s, RSTART)
+                            if (match(r, /"status":"[^"]+"/)) {
+                              sync = substr(r, RSTART + 10, RLENGTH - 11)
+                            }
+                          }
+                          if (match(s, /"health":\{"status":"[^"]+"/)) {
+                            health = substr(s, RSTART + 19, RLENGTH - 20)
+                          }
+                          if (match(s, /"operationState":\{/)) {
+                            r = substr(s, RSTART)
+                            if (match(r, /"phase":"[^"]+"/)) {
+                              phase = substr(r, RSTART + 9, RLENGTH - 10)
+                            }
+                          }
+                          if (match(s, /"type":"ComparisonError","message":"[^"]+"/)) {
+                            m = substr(s, RSTART)
+                            if (match(m, /"message":"[^"]+"/)) {
+                              cerr = substr(m, RSTART + 11, RLENGTH - 12)
+                            }
+                          } else if (match(s, /"message":"[^"]+","type":"ComparisonError"/)) {
+                            m = substr(s, RSTART)
+                            if (match(m, /"message":"[^"]+"/)) {
+                              cerr = substr(m, RSTART + 11, RLENGTH - 12)
+                            }
+                          }
+                          printf "SYNC=%s\\nHEALTH=%s\\nPHASE=%s\\nCERR=%s\\n", sync, health, phase, cerr
+                        }'
+                      }
+
                       for i in $(seq 1 60); do
                         APP_JSON="$(curl -fsS --cacert "${K8S_SA_CA}" \
                           -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
                           "${K8S_ARGOCD_APP_API}")"
 
-                        APP_COMPACT="$(printf '%s' "${APP_JSON}" | tr -d '\\n\\r\\t ')"
-                        APP_STATUS="$(printf '%s' "${APP_COMPACT}" | sed 's/"resources":\\[.*$//')"
-                        SYNC_STATUS="$(printf '%s' "${APP_STATUS}" | sed -n 's/.*"sync":{.*"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-                        HEALTH_STATUS="$(printf '%s' "${APP_STATUS}" | sed -n 's/.*"health":{[^}]*"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-                        OPERATION_PHASE="$(printf '%s' "${APP_STATUS}" | sed -n 's/.*"operationState":{.*"phase":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-                        COMPARISON_ERROR="$(printf '%s' "${APP_STATUS}" | sed -n 's/.*"type":"ComparisonError","message":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-                        if [ -z "${COMPARISON_ERROR}" ]; then
-                          COMPARISON_ERROR="$(printf '%s' "${APP_STATUS}" | sed -n 's/.*"message":"\\([^"]*\\)","type":"ComparisonError".*/\\1/p' | head -n 1)"
-                        fi
+                        PARSED="$(parse_argocd_app_status "${APP_JSON}")"
+                        SYNC_STATUS="$(printf '%s\\n' "${PARSED}" | sed -n "s/^SYNC=//p" | head -n 1)"
+                        HEALTH_STATUS="$(printf '%s\\n' "${PARSED}" | sed -n "s/^HEALTH=//p" | head -n 1)"
+                        OPERATION_PHASE="$(printf '%s\\n' "${PARSED}" | sed -n "s/^PHASE=//p" | head -n 1)"
+                        COMPARISON_ERROR="$(printf '%s\\n' "${PARSED}" | sed -n "s/^CERR=//p" | head -n 1)"
 
                         echo "attempt=${i} sync=${SYNC_STATUS:-unknown} health=${HEALTH_STATUS:-unknown} operation=${OPERATION_PHASE:-none}${COMPARISON_ERROR:+ comparisonError=yes}"
 
                         if [ -n "${COMPARISON_ERROR}" ]; then
                           echo "Argo CD ComparisonError for ${ARGOCD_APP_NAME}: ${COMPARISON_ERROR}"
-                          printf '%s\n' "${APP_JSON}"
+                          printf "%s\\n" "${APP_JSON}"
                           exit 1
                         fi
 
@@ -255,7 +301,7 @@ EOF
                         fi
 
                         if [ "${OPERATION_PHASE}" = "Failed" ] || [ "${OPERATION_PHASE}" = "Error" ]; then
-                          printf '%s\n' "${APP_JSON}"
+                          printf "%s\\n" "${APP_JSON}"
                           echo "Argo CD application ${ARGOCD_APP_NAME} sync failed (operation phase=${OPERATION_PHASE})"
                           exit 1
                         fi
@@ -280,10 +326,40 @@ EOF
 
                           APP_JSON="$(curl -fksS "${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP_NAME}" \
                             -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}")"
-                          APP_COMPACT="$(printf '%s' "${APP_JSON}" | tr -d '\\n\\r\\t ')"
-                          SYNC_STATUS="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"sync":{.*"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-                          HEALTH_STATUS="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"health":{.*"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-                          ARGOCD_REVISION="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"sync":{.*"revision":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+
+                          # Same resources-array stripping as Wait Argo CD Healthy (avoid false empty sync/health).
+                          PARSED="$(printf '%s' "${APP_JSON}" | tr -d '\\n\\r\\t ' | awk '
+                          {
+                            s = $0
+                            while ((p = index(s, "\"resources\":[")) > 0) {
+                              i = p + 14
+                              depth = 1
+                              while (i <= length(s) && depth > 0) {
+                                c = substr(s, i, 1)
+                                if (c == "[") depth++
+                                else if (c == "]") depth--
+                                i++
+                              }
+                              s = substr(s, 1, p - 1) substr(s, i)
+                            }
+                            sync = ""; health = ""; rev = ""
+                            if (match(s, /"sync":\{/)) {
+                              r = substr(s, RSTART)
+                              if (match(r, /"status":"[^"]+"/)) {
+                                sync = substr(r, RSTART + 10, RLENGTH - 11)
+                              }
+                              if (match(r, /"revision":"[^"]+"/)) {
+                                rev = substr(r, RSTART + 12, RLENGTH - 13)
+                              }
+                            }
+                            if (match(s, /"health":\{"status":"[^"]+"/)) {
+                              health = substr(s, RSTART + 19, RLENGTH - 20)
+                            }
+                            printf "SYNC=%s\\nHEALTH=%s\\nREV=%s\\n", sync, health, rev
+                          }')"
+                          SYNC_STATUS="$(printf '%s\\n' "${PARSED}" | sed -n "s/^SYNC=//p" | head -n 1)"
+                          HEALTH_STATUS="$(printf '%s\\n' "${PARSED}" | sed -n "s/^HEALTH=//p" | head -n 1)"
+                          ARGOCD_REVISION="$(printf '%s\\n' "${PARSED}" | sed -n "s/^REV=//p" | head -n 1)"
                           VERIFIED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
                           cat > /tmp/release-record.json <<EOF
