@@ -9,22 +9,12 @@ spec:
   imagePullSecrets:
     - name: harbor-pull-secret
   containers:
+    - name: jnlp
+      image: harbor-server.jianggan.cn/jenkins/inbound-agent:3384.v60d89463d9e0-2-jdk25
+      imagePullPolicy: IfNotPresent
     - name: kaniko
       image: harbor-server.jianggan.cn/kaniko/executor:v1.24.0-debug
       imagePullPolicy: IfNotPresent
-      env:
-        - name: HTTP_PROXY
-          value: "http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001"
-        - name: HTTPS_PROXY
-          value: "http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001"
-        - name: http_proxy
-          value: "http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001"
-        - name: https_proxy
-          value: "http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001"
-        - name: NO_PROXY
-          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.m.daocloud.io,daocloud.io,8.222.223.161,192.168.1.50,192.168.1.200"
-        - name: no_proxy
-          value: "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.m.daocloud.io,daocloud.io,8.222.223.161,192.168.1.50,192.168.1.200"
       command:
         - sleep
       args:
@@ -36,7 +26,7 @@ spec:
           mountPath: /kaniko/certs
           readOnly: true
     - name: curl
-      image: curlimages/curl:8.16.0
+      image: harbor-server.jianggan.cn/library/curl:8.16.0
       imagePullPolicy: IfNotPresent
       command:
         - cat
@@ -75,24 +65,13 @@ spec:
         ARGOCD_APP_PATH = "dev/backend/deployment/go/base"
         ARGOCD_VALUES_FILE = "values/cloudops-gateway.yaml"
         GO_BUILD_IMAGE = "harbor-server.jianggan.cn/library/golang:1.23-alpine"
-        PROXY_URL = 'http://vv-ai:w16y%2A3w2g862@8.222.223.161:32001'
-        HTTP_PROXY = "${PROXY_URL}"
-        HTTPS_PROXY = "${PROXY_URL}"
-        http_proxy = "${PROXY_URL}"
-        https_proxy = "${PROXY_URL}"
-        NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.m.daocloud.io,daocloud.io,8.222.223.161,192.168.1.50,192.168.1.200"
-        no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.svc,.cluster.local,.jianggan.cn,harbor-server.jianggan.cn,jenkins.jianggan.cn,argocd.jianggan.cn,docker.m.daocloud.io,daocloud.io,8.222.223.161,192.168.1.50,192.168.1.200"
-        GIT_CONFIG_COUNT = '5'
+        GIT_CONFIG_COUNT = '3'
         GIT_CONFIG_KEY_0 = 'http.version'
         GIT_CONFIG_VALUE_0 = 'HTTP/1.1'
-        GIT_CONFIG_KEY_1 = 'http.proxy'
-        GIT_CONFIG_VALUE_1 = "${PROXY_URL}"
-        GIT_CONFIG_KEY_2 = 'https.proxy'
-        GIT_CONFIG_VALUE_2 = "${PROXY_URL}"
-        GIT_CONFIG_KEY_3 = 'http.lowSpeedLimit'
-        GIT_CONFIG_VALUE_3 = '0'
-        GIT_CONFIG_KEY_4 = 'http.lowSpeedTime'
-        GIT_CONFIG_VALUE_4 = '999999'
+        GIT_CONFIG_KEY_1 = 'http.lowSpeedLimit'
+        GIT_CONFIG_VALUE_1 = '0'
+        GIT_CONFIG_KEY_2 = 'http.lowSpeedTime'
+        GIT_CONFIG_VALUE_2 = '999999'
     }
 
     stages {
@@ -100,15 +79,12 @@ spec:
             steps {
                 sh '''
                   git --version
+                  git config --global --unset-all http.proxy || true
+                  git config --global --unset-all https.proxy || true
+                  unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy || true
                   git config --global http.version HTTP/1.1
-                  git config --global http.proxy "${PROXY_URL}"
-                  git config --global https.proxy "${PROXY_URL}"
                   git config --global http.lowSpeedLimit 0
                   git config --global http.lowSpeedTime 999999
-                  export HTTP_PROXY="${PROXY_URL}"
-                  export HTTPS_PROXY="${PROXY_URL}"
-                  export http_proxy="${PROXY_URL}"
-                  export https_proxy="${PROXY_URL}"
                   git config --global --list
                 '''
             }
@@ -163,12 +139,6 @@ EOF
                         --build-arg VERSION="${IMAGE_TAG}" \
                         --build-arg COMMIT="${GIT_COMMIT_SHORT}" \
                         --build-arg BUILD_TIME="${BUILD_TIME}" \
-                        --build-arg HTTP_PROXY="${HTTP_PROXY}" \
-                        --build-arg HTTPS_PROXY="${HTTPS_PROXY}" \
-                        --build-arg NO_PROXY="${NO_PROXY}" \
-                        --build-arg http_proxy="${http_proxy}" \
-                        --build-arg https_proxy="${https_proxy}" \
-                        --build-arg no_proxy="${no_proxy}" \
                         --registry-certificate harbor-server.jianggan.cn=/kaniko/certs/jianggan-root-ca.crt
                     '''
                 }
@@ -258,11 +228,22 @@ EOF
                           "${K8S_ARGOCD_APP_API}")"
 
                         APP_COMPACT="$(printf '%s' "${APP_JSON}" | tr -d '\\n\\r\\t ')"
-                        SYNC_STATUS="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"sync":{.*"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-                        HEALTH_STATUS="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"health":{.*"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-                        OPERATION_PHASE="$(printf '%s' "${APP_COMPACT}" | sed -n 's/.*"operationState":{"phase":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                        APP_STATUS="$(printf '%s' "${APP_COMPACT}" | sed 's/"resources":\\[.*$//')"
+                        SYNC_STATUS="$(printf '%s' "${APP_STATUS}" | sed -n 's/.*"sync":{.*"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                        HEALTH_STATUS="$(printf '%s' "${APP_STATUS}" | sed -n 's/.*"health":{[^}]*"status":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                        OPERATION_PHASE="$(printf '%s' "${APP_STATUS}" | sed -n 's/.*"operationState":{.*"phase":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                        COMPARISON_ERROR="$(printf '%s' "${APP_STATUS}" | sed -n 's/.*"type":"ComparisonError","message":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                        if [ -z "${COMPARISON_ERROR}" ]; then
+                          COMPARISON_ERROR="$(printf '%s' "${APP_STATUS}" | sed -n 's/.*"message":"\\([^"]*\\)","type":"ComparisonError".*/\\1/p' | head -n 1)"
+                        fi
 
-                        echo "attempt=${i} sync=${SYNC_STATUS:-unknown} health=${HEALTH_STATUS:-unknown} operation=${OPERATION_PHASE:-none}"
+                        echo "attempt=${i} sync=${SYNC_STATUS:-unknown} health=${HEALTH_STATUS:-unknown} operation=${OPERATION_PHASE:-none}${COMPARISON_ERROR:+ comparisonError=yes}"
+
+                        if [ -n "${COMPARISON_ERROR}" ]; then
+                          echo "Argo CD ComparisonError for ${ARGOCD_APP_NAME}: ${COMPARISON_ERROR}"
+                          printf '%s\n' "${APP_JSON}"
+                          exit 1
+                        fi
 
                         if [ "${SYNC_STATUS}" = "Synced" ] && [ "${HEALTH_STATUS}" = "Healthy" ]; then
                           echo "Argo CD application ${ARGOCD_APP_NAME} synced and healthy"
@@ -271,7 +252,7 @@ EOF
 
                         if [ "${OPERATION_PHASE}" = "Failed" ] || [ "${OPERATION_PHASE}" = "Error" ]; then
                           printf '%s\n' "${APP_JSON}"
-                          echo "Argo CD application ${ARGOCD_APP_NAME} sync failed"
+                          echo "Argo CD application ${ARGOCD_APP_NAME} sync failed (operation phase=${OPERATION_PHASE})"
                           exit 1
                         fi
 
