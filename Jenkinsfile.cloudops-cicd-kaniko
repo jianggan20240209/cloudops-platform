@@ -231,7 +231,6 @@ EOF
                       # before reading sync/health. Truncating at the first resources key wrongly
                       # drops status.sync / status.health and leaves SYNC_STATUS empty forever.
                       parse_argocd_app_status() {
-                        # Groovy ''' strips \\ before "; build quote via sprintf to keep awk strings valid.
                         printf '%s' "$1" | tr -d '\\n\\r\\t ' | awk '
                         BEGIN { dq = sprintf("%c", 34) }
                         {
