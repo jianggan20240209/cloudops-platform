@@ -3,44 +3,279 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CloudOps AI Platform</title>
+  <title>CloudOps · Pod 日志</title>
   <style>
+    :root {
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --ink: #1f2328;
+      --muted: #57606a;
+      --line: #d0d7de;
+      --accent: #0969da;
+      --ok: #1a7f37;
+      --err: #cf222e;
+      --mono: "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
+    }
+    * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: Arial, "Microsoft YaHei", sans-serif;
-      background: #f6f8fa;
-      color: #1f2328;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(1200px 400px at 10% -10%, #dbeafe 0%, transparent 55%),
+        linear-gradient(180deg, #eef2f6 0%, var(--bg) 40%);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    header {
+      padding: 28px 24px 8px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    header h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+      letter-spacing: -0.02em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
     }
     main {
-      max-width: 960px;
-      margin: 80px auto;
-      padding: 32px;
-      background: #ffffff;
-      border: 1px solid #d0d7de;
-      border-radius: 12px;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 16px 24px 48px;
     }
-    h1 {
-      margin-top: 0;
-      font-size: 32px;
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 16px;
     }
-    p {
-      line-height: 1.7;
+    .panel h2 {
+      margin: 0 0 14px;
       font-size: 16px;
     }
-    code {
-      padding: 2px 6px;
-      background: #f6f8fa;
-      border: 1px solid #d0d7de;
-      border-radius: 6px;
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
     }
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    input, select, button {
+      font: inherit;
+    }
+    input, select {
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+      align-items: center;
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 9px 16px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #eaeef2;
+      color: var(--ink);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .meta {
+      font-size: 13px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+    .meta strong { color: var(--ok); }
+    .err { color: var(--err); }
+    .logs {
+      max-height: 62vh;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .log-row {
+      display: grid;
+      grid-template-columns: 170px 1fr;
+      gap: 10px;
+      padding: 8px 12px;
+      border-bottom: 1px solid #21262d;
+    }
+    .log-row:last-child { border-bottom: 0; }
+    .log-time { color: #8b949e; white-space: nowrap; }
+    .log-body { word-break: break-word; white-space: pre-wrap; }
+    .tag {
+      display: inline-block;
+      margin-right: 6px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: #21262d;
+      color: #79c0ff;
+      font-size: 11px;
+    }
+    .empty {
+      padding: 28px;
+      text-align: center;
+      color: #8b949e;
+    }
+    a { color: var(--accent); }
   </style>
 </head>
 <body>
-  <main>
+  <header>
     <h1>CloudOps AI Platform</h1>
-    <p>cloudops-web is running.</p>
-    <p>这是 CloudOps AI 智能运维平台的最小前端服务，用于验证 Jenkins、Kaniko、Harbor 和后续 GitOps 发布链路。</p>
-    <p>Service: <code>cloudops-web</code></p>
+    <p>Day 47 · Pod 详情日志查询（VictoriaLogs / <code>cloudops-observe</code>）</p>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>查询条件</h2>
+      <div class="grid">
+        <label>Namespace
+          <input id="namespace" value="cloudops-dev" />
+        </label>
+        <label>Pod（支持 *）
+          <input id="pod" value="cloudops-gateway-*" placeholder="cloudops-gateway-*" />
+        </label>
+        <label>Container
+          <input id="container" value="cloudops-gateway" />
+        </label>
+        <label>关键词 / q
+          <input id="q" placeholder="http_request" />
+        </label>
+        <label>trace_id
+          <input id="trace_id" placeholder="day46-trace-001" />
+        </label>
+        <label>Limit
+          <input id="limit" type="number" min="1" max="200" value="30" />
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnQuery" type="button">查询日志</button>
+        <button id="btnTrace" class="secondary" type="button">按 day46-trace-001</button>
+        <span id="status" class="meta">就绪</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>日志结果</h2>
+      <div id="queryMeta" class="meta" style="margin-bottom:10px;"></div>
+      <div id="logs" class="logs"><div class="empty">填写条件后点击查询</div></div>
+    </section>
   </main>
+
+  <script>
+    const API_BASE = "/api/v1/observe/logs";
+
+    function $(id) { return document.getElementById(id); }
+
+    function buildURL() {
+      const params = new URLSearchParams();
+      const fields = ["namespace", "pod", "container", "q", "trace_id", "limit"];
+      for (const key of fields) {
+        const v = $(key).value.trim();
+        if (v) params.set(key, v);
+      }
+      return API_BASE + "?" + params.toString();
+    }
+
+    function renderItems(payload) {
+      const box = $("logs");
+      const items = payload.items || [];
+      $("queryMeta").innerHTML =
+        "LogsQL: <strong>" + escapeHtml(payload.query || "") + "</strong> · count=" +
+        (payload.count ?? 0) + " · limit=" + (payload.limit ?? "-");
+
+      if (!items.length) {
+        box.innerHTML = '<div class="empty">无匹配日志</div>';
+        return;
+      }
+
+      box.innerHTML = items.map((item) => {
+        const tags = [];
+        if (item.pod) tags.push('<span class="tag">' + escapeHtml(item.pod) + "</span>");
+        if (item.container) tags.push('<span class="tag">' + escapeHtml(item.container) + "</span>");
+        if (item.trace_id) tags.push('<span class="tag">trace=' + escapeHtml(item.trace_id) + "</span>");
+        if (item.app_msg) tags.push('<span class="tag">' + escapeHtml(String(item.app_msg)) + "</span>");
+        const body = item.msg || JSON.stringify(item);
+        return (
+          '<div class="log-row">' +
+            '<div class="log-time">' + escapeHtml(item.time || "-") + "</div>" +
+            '<div class="log-body">' + tags.join("") + escapeHtml(body) + "</div>" +
+          "</div>"
+        );
+      }).join("");
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    async function runQuery() {
+      const btn = $("btnQuery");
+      const status = $("status");
+      btn.disabled = true;
+      status.textContent = "查询中…";
+      status.classList.remove("err");
+      try {
+        const res = await fetch(buildURL());
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || data.error || ("HTTP " + res.status));
+        }
+        renderItems(data);
+        status.innerHTML = "<strong>OK</strong>";
+      } catch (err) {
+        $("logs").innerHTML = '<div class="empty err">' + escapeHtml(err.message || String(err)) + "</div>";
+        status.textContent = "失败";
+        status.classList.add("err");
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    $("btnQuery").addEventListener("click", runQuery);
+    $("btnTrace").addEventListener("click", () => {
+      $("trace_id").value = "day46-trace-001";
+      $("q").value = "";
+      runQuery();
+    });
+
+    // Deep-link: /?namespace=&pod=&container=&trace_id=
+    const sp = new URLSearchParams(location.search);
+    ["namespace", "pod", "container", "q", "trace_id", "limit"].forEach((k) => {
+      if (sp.has(k)) $(k).value = sp.get(k);
+    });
+    if (sp.get("auto") === "1") runQuery();
+  </script>
 </body>
 </html>

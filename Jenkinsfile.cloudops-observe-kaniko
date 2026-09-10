@@ -1,0 +1,326 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  serviceAccountName: jenkins-kaniko-agent
+  imagePullSecrets:
+    - name: harbor-pull-secret
+  containers:
+    - name: jnlp
+      image: harbor-server.jianggan.cn/jenkins/inbound-agent:3384.v60d89463d9e0-2-jdk25
+      imagePullPolicy: IfNotPresent
+    - name: kaniko
+      image: harbor-server.jianggan.cn/kaniko/executor:v1.24.0-debug
+      imagePullPolicy: IfNotPresent
+      command:
+        - sleep
+      args:
+        - "999999"
+      volumeMounts:
+        - name: docker-config
+          mountPath: /kaniko/.docker
+        - name: jianggan-root-ca
+          mountPath: /kaniko/certs
+          readOnly: true
+    - name: curl
+      image: harbor-server.jianggan.cn/library/curl:8.16.0
+      imagePullPolicy: IfNotPresent
+      command:
+        - cat
+      tty: true
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+  volumes:
+    - name: docker-config
+      secret:
+        secretName: harbor-pull-secret
+        items:
+          - key: .dockerconfigjson
+            path: config.json
+    - name: jianggan-root-ca
+      secret:
+        secretName: jianggan-root-ca
+'''
+        }
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+    }
+
+    environment {
+        IMAGE = "harbor-server.jianggan.cn/cloudops/cloudops-observe"
+        IMAGE_TAG = "main-${BUILD_NUMBER}"
+        K8S_ARGOCD_APP_API = "https://kubernetes.default.svc/apis/argoproj.io/v1alpha1/namespaces/argocd/applications/cloudops-observe-dev"
+        ARGOCD_SERVER = "https://argocd.jianggan.cn"
+        ARGOCD_APP_NAME = "cloudops-observe-dev"
+        ARGOCD_APP_PATH = "dev/backend/deployment/go/base"
+        ARGOCD_VALUES_FILE = "values/cloudops-observe.yaml"
+        GO_BUILD_IMAGE = "harbor-server.jianggan.cn/library/golang:1.23-alpine"
+        GIT_CONFIG_COUNT = '3'
+        GIT_CONFIG_KEY_0 = 'http.version'
+        GIT_CONFIG_VALUE_0 = 'HTTP/1.1'
+        GIT_CONFIG_KEY_1 = 'http.lowSpeedLimit'
+        GIT_CONFIG_VALUE_1 = '0'
+        GIT_CONFIG_KEY_2 = 'http.lowSpeedTime'
+        GIT_CONFIG_VALUE_2 = '999999'
+    }
+
+    stages {
+        stage('Prepare Git') {
+            steps {
+                sh '''
+                  git --version
+                  git config --global --unset-all http.proxy || true
+                  git config --global --unset-all https.proxy || true
+                  unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy || true
+                  git config --global http.version HTTP/1.1
+                  git config --global http.lowSpeedLimit 0
+                  git config --global http.lowSpeedTime 999999
+                  git config --global --list
+                '''
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                retry(3) {
+                    git branch: 'main',
+                        credentialsId: 'github-user',
+                        url: 'https://github.com/jianggan20240209/cloudops-platform.git'
+                }
+            }
+        }
+
+        stage('Show Build Context') {
+            steps {
+                sh '''
+                  echo "===== WORKSPACE ====="
+                  pwd
+                  echo "===== cloudops-observe ====="
+                  find services/cloudops-observe -maxdepth 2 -type f | sort
+                  GIT_COMMIT_SHORT="$(git rev-parse --short=12 HEAD)"
+                  BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  cat > "${WORKSPACE}/observe-build.env" <<EOF
+GIT_COMMIT_SHORT=${GIT_COMMIT_SHORT}
+BUILD_TIME=${BUILD_TIME}
+EOF
+                  cat "${WORKSPACE}/observe-build.env"
+                '''
+            }
+        }
+
+        stage('Build And Push Image') {
+            steps {
+                container('kaniko') {
+                    sh '''
+                      . "${WORKSPACE}/observe-build.env"
+                      echo "IMAGE=${IMAGE}"
+                      echo "IMAGE_TAG=${IMAGE_TAG}"
+                      echo "GIT_COMMIT_SHORT=${GIT_COMMIT_SHORT}"
+                      echo "BUILD_TIME=${BUILD_TIME}"
+                      echo "GO_BUILD_IMAGE=${GO_BUILD_IMAGE}"
+
+                      /kaniko/executor \
+                        --image-download-retry=3 \
+                        --image-fs-extract-retry=3 \
+                        --context "${WORKSPACE}/services/cloudops-observe" \
+                        --dockerfile "${WORKSPACE}/services/cloudops-observe/Dockerfile" \
+                        --destination "${IMAGE}:${IMAGE_TAG}" \
+                        --build-arg GO_BUILD_IMAGE="${GO_BUILD_IMAGE}" \
+                        --build-arg VERSION="${IMAGE_TAG}" \
+                        --build-arg COMMIT="${GIT_COMMIT_SHORT}" \
+                        --build-arg BUILD_TIME="${BUILD_TIME}" \
+                        --registry-certificate harbor-server.jianggan.cn=/kaniko/certs/jianggan-root-ca.crt
+                    '''
+                }
+            }
+        }
+
+        stage('Update Argo CD Helm Parameter') {
+            steps {
+                script {
+                    writeFile file: 'argocd-image-tag-patch.json', text: groovy.json.JsonOutput.toJson([
+                        spec: [
+                            source: [
+                                helm: [
+                                    parameters: [
+                                        [name: 'app.imageTag', value: env.IMAGE_TAG, forceString: true]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ])
+                }
+                container('curl') {
+                    sh '''
+                      set -eu
+                      K8S_SA_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+                      K8S_SA_CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+                      echo "Patch Argo CD application ${ARGOCD_APP_NAME} imageTag=${IMAGE_TAG}"
+                      curl -fsS --cacert "${K8S_SA_CA}" \
+                        -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
+                        -H "Content-Type: application/merge-patch+json" \
+                        -X PATCH \
+                        --data @"${WORKSPACE}/argocd-image-tag-patch.json" \
+                        "${K8S_ARGOCD_APP_API}"
+
+                      APP_JSON="$(curl -fsS --cacert "${K8S_SA_CA}" \
+                        -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
+                        "${K8S_ARGOCD_APP_API}")"
+                      APP_COMPACT="$(printf '%s' "${APP_JSON}" | tr -d '\\n\\r\\t ')"
+                      CURRENT_TAG="$(printf '%s' "${APP_COMPACT}" | sed 's/"status":{.*$//' | sed -n 's/.*"name":"app.imageTag","value":"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                      if [ "${CURRENT_TAG}" != "${IMAGE_TAG}" ]; then
+                        echo "Failed to update app.imageTag: expected ${IMAGE_TAG}, got ${CURRENT_TAG:-<empty>}"
+                        printf '%s\\n' "${APP_JSON}"
+                        exit 1
+                      fi
+                      echo "Argo CD app.imageTag updated to ${IMAGE_TAG}"
+                    '''
+                }
+            }
+        }
+
+        stage('Sync Argo CD Application') {
+            steps {
+                writeFile file: 'argocd-refresh-patch.json', text: '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'
+                writeFile file: 'argocd-sync-patch.json', text: '{"operation":{"sync":{"revision":"main","prune":true}}}'
+                container('curl') {
+                    sh '''
+                      set -eu
+                      K8S_SA_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+                      K8S_SA_CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+                      curl -fsS --cacert "${K8S_SA_CA}" \
+                        -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
+                        -H "Content-Type: application/merge-patch+json" \
+                        -X PATCH \
+                        --data @"${WORKSPACE}/argocd-refresh-patch.json" \
+                        "${K8S_ARGOCD_APP_API}"
+                      curl -fsS --cacert "${K8S_SA_CA}" \
+                        -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
+                        -H "Content-Type: application/merge-patch+json" \
+                        -X PATCH \
+                        --data @"${WORKSPACE}/argocd-sync-patch.json" \
+                        "${K8S_ARGOCD_APP_API}"
+                    '''
+                }
+            }
+        }
+
+        stage('Wait Argo CD Healthy') {
+            steps {
+                container('curl') {
+                    sh '''
+                      set -eu
+                      K8S_SA_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+                      K8S_SA_CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+
+                      # Strip every "resources":[...] array (status.resources and syncResult.resources)
+                      # before reading sync/health. Truncating at the first resources key wrongly
+                      # drops status.sync / status.health and leaves SYNC_STATUS empty forever.
+                      parse_argocd_app_status() {
+                        printf '%s' "$1" | tr -d '\\n\\r\\t ' | awk '
+                        BEGIN { dq = sprintf("%c", 34) }
+                        {
+                          s = $0
+                          key = dq "resources" dq ":["
+                          while ((p = index(s, key)) > 0) {
+                            i = p + length(key)
+                            depth = 1
+                            while (i <= length(s) && depth > 0) {
+                              c = substr(s, i, 1)
+                              if (c == "[") depth++
+                              else if (c == "]") depth--
+                              i++
+                            }
+                            s = substr(s, 1, p - 1) substr(s, i)
+                          }
+                          sync = ""; health = ""; phase = ""; cerr = ""
+                          p = index(s, dq "sync" dq ":")
+                          if (p > 0) {
+                            r = substr(s, p)
+                            if (match(r, /"status":"[^"]+"/)) {
+                              sync = substr(r, RSTART + 10, RLENGTH - 11)
+                            }
+                          }
+                          p = index(s, dq "health" dq ":")
+                          if (p > 0) {
+                            r = substr(s, p)
+                            sp = index(r, dq "status" dq ":" dq)
+                            if (sp > 0) {
+                              r2 = substr(r, sp + 10)
+                              q = index(r2, dq)
+                              if (q > 0) health = substr(r2, 1, q - 1)
+                            }
+                          }
+                          p = index(s, dq "operationState" dq ":")
+                          if (p > 0) {
+                            r = substr(s, p)
+                            if (match(r, /"phase":"[^"]+"/)) {
+                              phase = substr(r, RSTART + 9, RLENGTH - 10)
+                            }
+                          }
+                          if (match(s, /"type":"ComparisonError","message":"[^"]+"/)) {
+                            m = substr(s, RSTART)
+                            if (match(m, /"message":"[^"]+"/)) {
+                              cerr = substr(m, RSTART + 11, RLENGTH - 12)
+                            }
+                          } else if (match(s, /"message":"[^"]+","type":"ComparisonError"/)) {
+                            m = substr(s, RSTART)
+                            if (match(m, /"message":"[^"]+"/)) {
+                              cerr = substr(m, RSTART + 11, RLENGTH - 12)
+                            }
+                          }
+                          printf "SYNC=%s\\nHEALTH=%s\\nPHASE=%s\\nCERR=%s\\n", sync, health, phase, cerr
+                        }'
+                      }
+
+                      for i in $(seq 1 60); do
+                        APP_JSON="$(curl -fsS --cacert "${K8S_SA_CA}" \
+                          -H "Authorization: Bearer ${K8S_SA_TOKEN}" \
+                          "${K8S_ARGOCD_APP_API}")"
+
+                        PARSED="$(parse_argocd_app_status "${APP_JSON}")"
+                        SYNC_STATUS="$(printf '%s\\n' "${PARSED}" | sed -n "s/^SYNC=//p" | head -n 1)"
+                        HEALTH_STATUS="$(printf '%s\\n' "${PARSED}" | sed -n "s/^HEALTH=//p" | head -n 1)"
+                        OPERATION_PHASE="$(printf '%s\\n' "${PARSED}" | sed -n "s/^PHASE=//p" | head -n 1)"
+                        COMPARISON_ERROR="$(printf '%s\\n' "${PARSED}" | sed -n "s/^CERR=//p" | head -n 1)"
+
+                        echo "attempt=${i} sync=${SYNC_STATUS:-unknown} health=${HEALTH_STATUS:-unknown} operation=${OPERATION_PHASE:-none}${COMPARISON_ERROR:+ comparisonError=yes}"
+
+                        if [ -n "${COMPARISON_ERROR}" ]; then
+                          echo "Argo CD ComparisonError for ${ARGOCD_APP_NAME}: ${COMPARISON_ERROR}"
+                          printf "%s\\n" "${APP_JSON}"
+                          exit 1
+                        fi
+
+                        if [ "${SYNC_STATUS}" = "Synced" ] && [ "${HEALTH_STATUS}" = "Healthy" ]; then
+                          echo "Argo CD application ${ARGOCD_APP_NAME} synced and healthy"
+                          exit 0
+                        fi
+
+                        if [ "${OPERATION_PHASE}" = "Failed" ] || [ "${OPERATION_PHASE}" = "Error" ]; then
+                          printf "%s\\n" "${APP_JSON}"
+                          echo "Argo CD application ${ARGOCD_APP_NAME} sync failed (operation phase=${OPERATION_PHASE})"
+                          exit 1
+                        fi
+
+                        sleep 5
+                      done
+
+                      echo "Timed out waiting for ${ARGOCD_APP_NAME} to become Synced/Healthy"
+                      exit 1
+                    '''
+                }
+            }
+        }
+    }
+}
