@@ -8,7 +8,7 @@ ARG BUILD_TIME=unknown
 WORKDIR /src
 
 COPY go.mod ./
-COPY main.go ./
+COPY *.go ./
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -trimpath \
