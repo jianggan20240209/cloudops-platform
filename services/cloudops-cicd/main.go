@@ -586,6 +586,7 @@ func main() {
 	addr := env("HTTP_ADDR", ":8080")
 	recordStore = newReleaseRecordStore()
 	buildStore = newBuildRecordStore()
+	releaseRequestStore = newReleaseRequestStore()
 	initBuildSemaphore()
 	ctx := context.Background()
 
@@ -611,6 +612,8 @@ func main() {
 	mux.HandleFunc("/api/v1/cicd/releases/records", releaseRecordsHandler)
 	mux.HandleFunc("/api/v1/cicd/builds", buildsRootHandler)
 	mux.HandleFunc("/api/v1/cicd/builds/", buildsSubHandler)
+	mux.HandleFunc("/api/v1/cicd/release-requests", releaseRequestsRootHandler)
+	mux.HandleFunc("/api/v1/cicd/release-requests/", releaseRequestsSubHandler)
 	mux.HandleFunc("/metrics", metricsHandler)
 	mux.HandleFunc("/", notFoundHandler)
 

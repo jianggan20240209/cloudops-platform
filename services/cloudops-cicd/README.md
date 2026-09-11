@@ -64,6 +64,9 @@ services/cloudops-cicd
 | `GET /api/v1/cicd/builds` | 构建历史列表 |
 | `GET /api/v1/cicd/builds/{id}` | 单条构建状态 |
 | `POST /api/v1/cicd/builds/notify` | Webhook 通知 / 预览（成功不带构建 URL，失败带 URL） |
+| `GET/POST /api/v1/cicd/release-requests` | 发布申请列表 / 创建（Day 83） |
+| `GET /api/v1/cicd/release-requests/{id}` | 发布申请详情 |
+| `POST /api/v1/cicd/release-requests/{id}/decide` | 审批通过/驳回 |
 | `/metrics` | Prometheus 指标 |
 
 ## 镜像名称

@@ -187,7 +187,7 @@
 <body>
   <header>
     <h1>CloudOps AI Platform</h1>
-    <p>Day 71–77 · Jenkins + Harbor 构建制品治理 + 观测入口</p>
+    <p>Day 71–98 · 构建 / GitOps / 灰度 / 观测入口</p>
   </header>
   <main>
     <section class="panel">
@@ -242,6 +242,59 @@
       <div id="alertMeta" class="meta" style="margin:10px 0;"></div>
       <div id="alerts" class="logs"><div class="empty">点击刷新告警</div></div>
       <pre id="alertDetail" class="logs" style="margin-top:12px;max-height:40vh;white-space:pre-wrap;padding:12px;"></pre>
+    </section>
+
+    <section class="panel">
+      <h2>Argo CD 应用状态（Day 81）</h2>
+      <p class="hint">只读：调用 <code class="inline">/api/v1/cicd/apps</code>。</p>
+      <div class="actions">
+        <button id="btnApps" type="button">刷新应用</button>
+        <span id="appsStatus" class="meta">就绪</span>
+      </div>
+      <div id="appsMeta" class="meta" style="margin:10px 0;"></div>
+      <div id="apps" class="logs"><div class="empty">点击刷新</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>发布申请（Day 83）</h2>
+      <div class="grid">
+        <label>App
+          <input id="rrApp" value="cloudops-web" />
+        </label>
+        <label>Image tag
+          <input id="rrTag" value="main-1" />
+        </label>
+        <label>Requester
+          <input id="rrUser" value="lab" />
+        </label>
+        <label>Risk
+          <input id="rrRisk" value="low" />
+        </label>
+      </div>
+      <label>变更说明
+        <input id="rrSummary" value="lab release request" />
+      </label>
+      <div class="actions">
+        <button id="btnRrCreate" type="button">提交申请</button>
+        <button id="btnRrList" class="secondary" type="button">刷新列表</button>
+        <span id="rrStatus" class="meta">就绪</span>
+      </div>
+      <div id="rrList" class="logs"><div class="empty">无申请</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>发布失败诊断（Day 89）</h2>
+      <p class="hint">聚合 release / observability / Jenkins 字段（只读）。</p>
+      <div class="grid">
+        <label>App
+          <input id="diagApp" value="cloudops-gateway-rollout" />
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnDiag" type="button">诊断</button>
+        <span id="diagStatus" class="meta">就绪</span>
+      </div>
+      <pre id="diagOut" class="logs" style="margin-top:12px;max-height:40vh;white-space:pre-wrap;padding:12px;"></pre>
     </section>
 
     <section class="panel">
@@ -302,9 +355,117 @@ cloudops-cicd main</textarea>
     const ALERTS_API = "/api/v1/observe/alerts";
     const ALERT_DETAIL_API = "/api/v1/observe/alerts/detail";
     const BUILDS_API = "/api/v1/cicd/builds";
+    const APPS_API = "/api/v1/cicd/apps";
+    const RR_API = "/api/v1/cicd/release-requests";
     const GRAFANA_BASE = "https://grafana.jianggan.cn";
     const HUBBLE_URL = "http://192.168.1.200:12000";
     const HUBBLE_PF = "kubectl -n kube-system port-forward --address 0.0.0.0 svc/hubble-ui 12000:80";
+
+    async function loadApps() {
+      $("appsStatus").textContent = "加载中…";
+      try {
+        const res = await fetch(APPS_API);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || data.error || ("HTTP " + res.status));
+        const items = data.items || data.apps || data || [];
+        const list = Array.isArray(items) ? items : (items.items || []);
+        $("appsMeta").textContent = "count=" + list.length + " source=" + (data.source || "-");
+        $("apps").innerHTML = list.map((a) => {
+          return '<div class="log-row"><div class="log-body">' +
+            '<span class="tag">' + escapeHtml(a.name || "-") + "</span>" +
+            '<span class="tag">sync=' + escapeHtml(a.sync || "-") + "</span>" +
+            '<span class="tag">health=' + escapeHtml(a.health || "-") + "</span>" +
+            '<span class="tag">' + escapeHtml(a.current_tag || a.image || "") + "</span>" +
+            (a.revision ? '<span class="tag">rev=' + escapeHtml(a.revision) + "</span>" : "") +
+            "</div></div>";
+        }).join("") || '<div class="empty">无应用</div>';
+        $("appsStatus").textContent = "OK";
+      } catch (err) {
+        $("appsStatus").textContent = err.message || String(err);
+        $("appsStatus").classList.add("err");
+      }
+    }
+
+    async function createReleaseRequest() {
+      $("rrStatus").textContent = "提交中…";
+      try {
+        const body = {
+          app_name: $("rrApp").value.trim(),
+          image_tag: $("rrTag").value.trim(),
+          requester: $("rrUser").value.trim(),
+          risk_level: $("rrRisk").value.trim(),
+          change_summary: $("rrSummary").value.trim(),
+          status: "pending"
+        };
+        const res = await fetch(RR_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || data.error || ("HTTP " + res.status));
+        $("rrStatus").textContent = "已创建 " + (data.request && data.request.id ? data.request.id.slice(0, 8) : "");
+        await listReleaseRequests();
+      } catch (err) {
+        $("rrStatus").textContent = err.message || String(err);
+        $("rrStatus").classList.add("err");
+      }
+    }
+
+    async function listReleaseRequests() {
+      try {
+        const res = await fetch(RR_API + "?limit=20");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || data.error || ("HTTP " + res.status));
+        const items = data.items || [];
+        $("rrList").innerHTML = items.map((r) => {
+          return '<div class="log-row"><div class="log-body">' +
+            '<span class="tag">' + escapeHtml(r.app_name) + "</span>" +
+            '<span class="tag">' + escapeHtml(r.image_tag) + "</span>" +
+            '<span class="tag">' + escapeHtml(r.status) + "</span>" +
+            '<span class="tag">' + escapeHtml(r.risk_level || "") + "</span>" +
+            (r.approver ? '<span class="tag">by=' + escapeHtml(r.approver) + "</span>" : "") +
+            "</div></div>";
+        }).join("") || '<div class="empty">无申请</div>';
+      } catch (err) {
+        $("rrList").innerHTML = '<div class="empty err">' + escapeHtml(err.message || String(err)) + "</div>";
+      }
+    }
+
+    async function runDiagnosis() {
+      const app = $("diagApp").value.trim();
+      $("diagStatus").textContent = "诊断中…";
+      $("diagOut").textContent = "";
+      try {
+        const [rel, obs, rec] = await Promise.all([
+          fetch(APPS_API + "/" + encodeURIComponent(app) + "/release").then((r) => r.json()),
+          fetch(APPS_API + "/" + encodeURIComponent(app) + "/observability").then((r) => r.json()).catch(() => ({})),
+          fetch(APPS_API + "/" + encodeURIComponent(app) + "/records/latest").then((r) => r.json()).catch(() => ({}))
+        ]);
+        const record = rec.record || rec.item || rec;
+        const jenkinsJob = record.jenkins_job || "";
+        const jenkinsBuild = record.jenkins_build || "";
+        const buildURL = jenkinsJob && jenkinsBuild
+          ? ("https://jenkins.jianggan.cn/job/" + jenkinsJob + "/" + jenkinsBuild + "/")
+          : "";
+        const out = {
+          app,
+          release_ready: rel.ready,
+          release_status: rel.status,
+          checks: rel.checks,
+          warnings: rel.warnings,
+          observability: obs,
+          latest_record: record,
+          links: {
+            grafana: GRAFANA_BASE,
+            tempo_explore: GRAFANA_BASE + "/explore",
+            jenkins_build: buildURL,
+            logs: "/api/v1/observe/logs?namespace=cloudops-dev&pod=" + encodeURIComponent(app) + "-*"
+          }
+        };
+        $("diagOut").textContent = JSON.stringify(out, null, 2);
+        $("diagStatus").textContent = "OK";
+      } catch (err) {
+        $("diagStatus").textContent = err.message || String(err);
+        $("diagStatus").classList.add("err");
+      }
+    }
 
     function parseBuildList() {
       return $("buildList").value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
@@ -504,6 +665,10 @@ cloudops-cicd main</textarea>
     $("btnBuildDry").addEventListener("click", runBuildDry);
     $("btnBuildRun").addEventListener("click", runBuildTrigger);
     $("btnBuildHist").addEventListener("click", loadBuildHistory);
+    $("btnApps").addEventListener("click", loadApps);
+    $("btnRrCreate").addEventListener("click", createReleaseRequest);
+    $("btnRrList").addEventListener("click", listReleaseRequests);
+    $("btnDiag").addEventListener("click", runDiagnosis);
     $("btnTrace").addEventListener("click", () => {
       $("trace_id").value = "day46-trace-001";
       $("q").value = "";
