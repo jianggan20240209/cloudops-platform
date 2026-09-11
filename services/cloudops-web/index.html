@@ -291,24 +291,21 @@
     function $(id) { return document.getElementById(id); }
 
     function tempoExploreURL(traceId) {
-      const panes = {
-        d55: {
-          datasource: "tempo",
-          queries: [
-            {
-              refId: "A",
-              datasource: { type: "tempo", uid: "tempo" },
-              queryType: traceId ? "traceql" : "traceqlSearch",
-              limit: 20,
-              tableType: "traces",
-              query: traceId || '{resource.service.name=~".+"}'
-            }
-          ],
-          range: { from: "now-6h", to: "now" }
-        }
+      // classic left= Explore state — panes= crashes some Grafana builds (fields undefined)
+      const left = {
+        datasource: "tempo",
+        queries: [
+          {
+            refId: "A",
+            datasource: { type: "tempo", uid: "tempo" },
+            queryType: traceId ? "traceql" : "traceqlSearch",
+            limit: 20,
+            query: traceId || ""
+          }
+        ],
+        range: { from: "now-6h", to: "now" }
       };
-      return GRAFANA_BASE + "/explore?orgId=1&schemaVersion=1&panes=" +
-        encodeURIComponent(JSON.stringify(panes));
+      return GRAFANA_BASE + "/explore?orgId=1&left=" + encodeURIComponent(JSON.stringify(left));
     }
 
     function refreshJumpLinks() {
