@@ -585,6 +585,8 @@ type prometheusQueryResponse struct {
 func main() {
 	addr := env("HTTP_ADDR", ":8080")
 	recordStore = newReleaseRecordStore()
+	buildStore = newBuildRecordStore()
+	initBuildSemaphore()
 	ctx := context.Background()
 
 	shutdown, err := initTracer(ctx)
@@ -607,6 +609,8 @@ func main() {
 	mux.HandleFunc("/api/v1/cicd/apps", appsHandler)
 	mux.HandleFunc("/api/v1/cicd/apps/", appDetailHandler)
 	mux.HandleFunc("/api/v1/cicd/releases/records", releaseRecordsHandler)
+	mux.HandleFunc("/api/v1/cicd/builds", buildsRootHandler)
+	mux.HandleFunc("/api/v1/cicd/builds/", buildsSubHandler)
 	mux.HandleFunc("/metrics", metricsHandler)
 	mux.HandleFunc("/", notFoundHandler)
 

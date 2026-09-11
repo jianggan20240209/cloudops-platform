@@ -352,3 +352,49 @@ func TestDestinationLabelFromMetric(t *testing.T) {
 		t.Fatalf("label = %q", label)
 	}
 }
+
+func TestMatchJenkinsJob(t *testing.T) {
+	jobs := []JenkinsJob{
+		{Name: "cloudops-web-kaniko", URL: "https://jenkins.jianggan.cn/job/cloudops-web-kaniko/"},
+		{Name: "test-cloudops-cicd-kaniko", URL: "https://jenkins.jianggan.cn/job/test-cloudops-cicd-kaniko/"},
+		{Name: "other-job", URL: "https://jenkins.jianggan.cn/job/other-job/"},
+	}
+	got, err := matchJenkinsJob("cloudops-web", jobs)
+	if err != nil {
+		t.Fatalf("matchJenkinsJob: %v", err)
+	}
+	if got.Name != "cloudops-web-kaniko" {
+		t.Fatalf("got %q", got.Name)
+	}
+	got, err = matchJenkinsJob("cloudops-cicd", jobs)
+	if err != nil {
+		t.Fatalf("matchJenkinsJob cicd: %v", err)
+	}
+	if got.Name != "test-cloudops-cicd-kaniko" {
+		t.Fatalf("got %q", got.Name)
+	}
+}
+
+func TestRenderNotifyMessage(t *testing.T) {
+	okMsg := renderNotifyMessage(notifyRequest{
+		Service:  "cloudops-web",
+		Branch:   "main",
+		JobName:  "cloudops-web-kaniko",
+		BuildURL: "https://jenkins.jianggan.cn/job/cloudops-web-kaniko/12/",
+		Status:   "SUCCESS",
+	})
+	if strings.Contains(okMsg, "https://jenkins") {
+		t.Fatalf("success message should hide build url: %s", okMsg)
+	}
+	failMsg := renderNotifyMessage(notifyRequest{
+		Service:  "cloudops-web",
+		Branch:   "main",
+		JobName:  "cloudops-web-kaniko",
+		BuildURL: "https://jenkins.jianggan.cn/job/cloudops-web-kaniko/12/",
+		Status:   "FAILURE",
+		Message:  "kaniko failed",
+	})
+	if !strings.Contains(failMsg, "https://jenkins.jianggan.cn/job/cloudops-web-kaniko/12/") {
+		t.Fatalf("failure message should include build url: %s", failMsg)
+	}
+}

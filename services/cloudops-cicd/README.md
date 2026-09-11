@@ -10,7 +10,7 @@
 - Helm imageTag
 - 发布健康状态
 
-当前版本会优先从 Argo CD API 读取实时 Application 状态，可从 Harbor API 查询镜像 tag 列表，并可从 Prometheus API 查询基础运行指标；如果没有配置对应依赖或调用失败，会回退到静态示例数据。后续再逐步接入 Jenkins API。
+当前版本会优先从 Argo CD API 读取实时 Application 状态，可从 Harbor API 查询镜像 tag 列表，并可从 Prometheus API 查询基础运行指标；**Week 11** 已接入 Jenkins API：匹配 job、dry-run、触发构建、队列/状态轮询、并发限制、构建历史与 webhook 通知模板。
 
 访问日志为结构化 JSON（`trace_id` / `request_id`），与 gateway 约定一致（Day 45）；探针路径不打访问日志。
 少量 OTel SDK（Day 52）：`otelhttp` → Collector → Tempo，Resource 含 `service.version` / `deployment.id`。
@@ -24,6 +24,9 @@ services/cloudops-cicd
 ├── go.mod
 ├── go.sum
 ├── main.go
+├── jenkins.go
+├── builds.go
+├── build_store.go
 └── otel.go
 ```
 
@@ -55,6 +58,12 @@ services/cloudops-cicd
 | `/api/v1/cicd/apps/{name}/analysisruns` | 查询应用对应 AnalysisRun 列表 |
 | `/api/v1/cicd/apps/{name}/traffic` | 查询应用对应 Istio VirtualService / DestinationRule 摘要 |
 | `/api/v1/cicd/apps/{name}/observability` | 关联灰度阶段与 Istio 指标，用于故障复盘 |
+| `POST /api/v1/cicd/builds/match` | 匹配 Jenkins job（服务名 → job） |
+| `POST /api/v1/cicd/builds/dry-run` | 批量匹配，不触发构建 |
+| `POST /api/v1/cicd/builds` | 触发构建（支持 `dry_run` / `notify`）；异步排队与轮询 |
+| `GET /api/v1/cicd/builds` | 构建历史列表 |
+| `GET /api/v1/cicd/builds/{id}` | 单条构建状态 |
+| `POST /api/v1/cicd/builds/notify` | Webhook 通知 / 预览（成功不带构建 URL，失败带 URL） |
 | `/metrics` | Prometheus 指标 |
 
 ## 镜像名称
@@ -80,6 +89,16 @@ harbor-server.jianggan.cn/cloudops/cloudops-cicd:<tag>
 | `HARBOR_USERNAME` | 空 | Harbor 用户名或 Robot 账号 |
 | `HARBOR_PASSWORD` | 空 | Harbor 密码或 Robot Token |
 | `HARBOR_INSECURE` | `true` | 是否跳过 Harbor HTTPS 证书校验 |
+| `JENKINS_URL` | 空 | Jenkins 根地址，例如 `https://jenkins.jianggan.cn` |
+| `JENKINS_USER` | 空 | Jenkins 用户名 |
+| `JENKINS_TOKEN` / `JENKINS_PASSWORD` | 空 | API Token 或密码 |
+| `JENKINS_INSECURE` | `true` | 是否跳过 Jenkins HTTPS 证书校验 |
+| `JENKINS_MAX_CONCURRENT` | `3` | 同时跟踪的最大构建数 |
+| `JENKINS_QUEUE_TIMEOUT` | `300` | 等待队列出队秒数 |
+| `JENKINS_BUILD_TIMEOUT` | `7200` | 等待构建结束秒数 |
+| `JENKINS_POLL_INTERVAL` | `10` | 轮询间隔秒数 |
+| `WEBHOOK_INFO_URL` | 空 | 通知配置接口（返回 `webhook` + `token`） |
+| `SEND_WEBHOOK` | `false` | 触发构建后是否默认发通知 |
 | `PROMETHEUS_SERVER` | 空 | Prometheus API 地址，例如 `http://kube-prometheus-stack-prometheus.monitoring.svc:9090` |
 | `RELEASE_RECORD_DATABASE_URL` | 空 | PostgreSQL DSN，未配置时使用内存存储 |
 | `POSTGRES_DSN` | 空 | PostgreSQL DSN 兼容变量，优先级低于 `RELEASE_RECORD_DATABASE_URL` |
@@ -184,5 +203,7 @@ curl http://127.0.0.1:8080/api/v1/cicd/apps/rollouts-demo-istio/analysisruns
 curl -X POST http://127.0.0.1:8080/api/v1/cicd/releases/records \
   -H 'Content-Type: application/json' \
   --data '{"app_name":"cloudops-gateway","env":"dev","namespace":"cloudops-dev","image":"harbor-server.jianggan.cn/cloudops/cloudops-gateway:main-15","image_tag":"main-15","argocd_app":"cloudops-gateway-dev","argocd_sync":"Synced","argocd_health":"Healthy","status":"succeeded","verification":{"ready":true}}'
+curl http://127.0.0.1:8080/api/v1/cicd/builds/dry-run -H 'Content-Type: application/json' --data '{"items":[{"service":"cloudops-web","branch":"main"}]}'
+curl http://127.0.0.1:8080/api/v1/cicd/builds
 curl http://127.0.0.1:8080/metrics
 ```

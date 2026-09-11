@@ -187,7 +187,7 @@
 <body>
   <header>
     <h1>CloudOps AI Platform</h1>
-    <p>Day 59–60 · 观测入口 + 告警列表/详情（Alertmanager）</p>
+    <p>Day 71–77 · Jenkins + Harbor 构建制品治理 + 观测入口</p>
   </header>
   <main>
     <section class="panel">
@@ -245,6 +245,23 @@
     </section>
 
     <section class="panel">
+      <h2>批量构建（Day 74）</h2>
+      <p class="hint">每行：<code class="inline">服务名 分支</code>，例如 <code class="inline">cloudops-web main</code>。先 dry-run 匹配 job，再触发。</p>
+      <label>构建清单
+        <textarea id="buildList" rows="5" style="width:100%;font-family:ui-monospace,Consolas,monospace;padding:8px;border:1px solid #d0d7de;border-radius:6px;">cloudops-web main
+cloudops-cicd main</textarea>
+      </label>
+      <div class="actions">
+        <button id="btnBuildDry" class="secondary" type="button">Dry-run 匹配</button>
+        <button id="btnBuildRun" type="button">触发构建</button>
+        <button id="btnBuildHist" class="secondary" type="button">刷新历史</button>
+        <span id="buildStatus" class="meta">就绪</span>
+      </div>
+      <div id="buildMeta" class="meta" style="margin:10px 0;"></div>
+      <div id="builds" class="logs"><div class="empty">先 dry-run 或触发构建</div></div>
+    </section>
+
+    <section class="panel">
       <h2>查询条件</h2>
       <div class="grid">
         <label>Namespace
@@ -284,9 +301,102 @@
     const API_BASE = "/api/v1/observe/logs";
     const ALERTS_API = "/api/v1/observe/alerts";
     const ALERT_DETAIL_API = "/api/v1/observe/alerts/detail";
+    const BUILDS_API = "/api/v1/cicd/builds";
     const GRAFANA_BASE = "https://grafana.jianggan.cn";
     const HUBBLE_URL = "http://192.168.1.200:12000";
     const HUBBLE_PF = "kubectl -n kube-system port-forward --address 0.0.0.0 svc/hubble-ui 12000:80";
+
+    function parseBuildList() {
+      return $("buildList").value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+        const parts = line.split(/\s+/);
+        return { service: parts[0], branch: parts[1] || "main" };
+      });
+    }
+
+    function renderBuildRows(items, title) {
+      $("buildMeta").textContent = title || "";
+      if (!items || !items.length) {
+        $("builds").innerHTML = '<div class="empty">无结果</div>';
+        return;
+      }
+      $("builds").innerHTML = items.map((item) => {
+        const m = item.job ? item : item;
+        const job = (m.job && m.job.name) || m.jenkins_job || "-";
+        const svc = m.service || "-";
+        const branch = m.branch || "";
+        const status = m.status || (m.expected_image_tag ? "matched" : "");
+        const tag = m.image_tag || m.expected_image_tag || "";
+        const build = m.jenkins_build || "";
+        const url = m.build_url || (m.job && m.job.url) || "";
+        const err = m.error || m.failure_reason || "";
+        const tags = [
+          '<span class="tag">' + escapeHtml(svc) + "</span>",
+          branch ? '<span class="tag">' + escapeHtml(branch) + "</span>" : "",
+          '<span class="tag">' + escapeHtml(job) + "</span>",
+          status ? '<span class="tag">' + escapeHtml(status) + "</span>" : "",
+          build ? '<span class="tag">#' + escapeHtml(build) + "</span>" : "",
+          tag ? '<span class="tag">' + escapeHtml(tag) + "</span>" : ""
+        ].filter(Boolean).join("");
+        const link = url
+          ? ' <a class="tag-link" href="' + escapeHtml(url) + '" target="_blank" rel="noopener">open</a>'
+          : "";
+        const fail = err ? '<div class="log-body err">' + escapeHtml(err) + "</div>" : "";
+        return '<div class="log-row"><div class="log-body">' + tags + link + "</div>" + fail + "</div>";
+      }).join("");
+    }
+
+    async function postBuilds(path, body) {
+      const res = await fetch(BUILDS_API + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.error || ("HTTP " + res.status));
+      return data;
+    }
+
+    async function runBuildDry() {
+      $("buildStatus").textContent = "匹配中…";
+      try {
+        const data = await postBuilds("/dry-run", { items: parseBuildList() });
+        const rows = (data.matches || []).concat((data.failures || []).map((f) => ({ ...f, status: "error" })));
+        renderBuildRows(rows, "dry-run · source=" + (data.source || "-"));
+        $("buildStatus").textContent = "匹配完成";
+      } catch (err) {
+        $("buildStatus").textContent = err.message || String(err);
+        $("buildStatus").classList.add("err");
+        $("builds").innerHTML = '<div class="empty err">' + escapeHtml(err.message || String(err)) + "</div>";
+      }
+    }
+
+    async function runBuildTrigger() {
+      $("buildStatus").textContent = "触发中…";
+      $("buildStatus").classList.remove("err");
+      try {
+        const data = await postBuilds("", { items: parseBuildList(), notify: false });
+        const rows = (data.builds || []).concat((data.failures || []).map((f) => ({ ...f, status: "error" })));
+        renderBuildRows(rows, "accepted=" + (data.accepted ?? 0));
+        $("buildStatus").textContent = "已受理，可刷新历史";
+      } catch (err) {
+        $("buildStatus").textContent = err.message || String(err);
+        $("buildStatus").classList.add("err");
+      }
+    }
+
+    async function loadBuildHistory() {
+      $("buildStatus").textContent = "加载历史…";
+      try {
+        const res = await fetch(BUILDS_API + "?limit=30");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || data.error || ("HTTP " + res.status));
+        renderBuildRows(data.items || [], "history count=" + (data.count ?? 0));
+        $("buildStatus").textContent = "历史已刷新";
+      } catch (err) {
+        $("buildStatus").textContent = err.message || String(err);
+        $("buildStatus").classList.add("err");
+      }
+    }
 
     function $(id) { return document.getElementById(id); }
 
@@ -391,6 +501,9 @@
     }
 
     $("btnQuery").addEventListener("click", runQuery);
+    $("btnBuildDry").addEventListener("click", runBuildDry);
+    $("btnBuildRun").addEventListener("click", runBuildTrigger);
+    $("btnBuildHist").addEventListener("click", loadBuildHistory);
     $("btnTrace").addEventListener("click", () => {
       $("trace_id").value = "day46-trace-001";
       $("q").value = "";

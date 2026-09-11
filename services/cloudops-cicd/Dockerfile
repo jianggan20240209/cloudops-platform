@@ -18,7 +18,7 @@ COPY go.mod go.sum ./
 ENV GOPROXY=${GOPROXY}
 RUN go mod download
 
-COPY main.go otel.go ./
+COPY *.go ./
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -trimpath \
