@@ -187,7 +187,7 @@
 <body>
   <header>
     <h1>CloudOps AI Platform</h1>
-    <p>Day 55 · 观测入口（日志 → Tempo / Grafana / Hubble）</p>
+    <p>Day 59–60 · 观测入口 + 告警列表/详情（Alertmanager）</p>
   </header>
   <main>
     <section class="panel">
@@ -210,6 +210,10 @@
           <strong>Hubble UI</strong>
           <span>https://192.168.1.200:12000 · filter cloudops-dev</span>
         </a>
+        <a class="jump-card" href="https://alertmanager.jianggan.cn" target="_blank" rel="noopener">
+          <strong>Alertmanager</strong>
+          <span>alertmanager.jianggan.cn</span>
+        </a>
       </div>
       <div class="actions">
         <button id="btnOpenTempo" class="secondary" type="button">打开 Tempo（当前 trace_id）</button>
@@ -219,6 +223,25 @@
       <p class="hint" style="margin:10px 0 0;">
         Hubble：<code class="inline">kubectl -n kube-system port-forward --address 0.0.0.0 svc/hubble-ui 12000:80</code>
       </p>
+    </section>
+
+    <section class="panel">
+      <h2>告警列表（Day 59）</h2>
+      <div class="grid">
+        <label>severity
+          <input id="alertSeverity" placeholder="P0 / P1 / P2 / P3" />
+        </label>
+        <label>filter（Alertmanager）
+          <input id="alertFilter" placeholder='alertname="KubePodCrashLooping"' />
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnAlerts" type="button">刷新告警</button>
+        <span id="alertStatus" class="meta">就绪</span>
+      </div>
+      <div id="alertMeta" class="meta" style="margin:10px 0;"></div>
+      <div id="alerts" class="logs"><div class="empty">点击刷新告警</div></div>
+      <pre id="alertDetail" class="logs" style="margin-top:12px;max-height:40vh;white-space:pre-wrap;padding:12px;"></pre>
     </section>
 
     <section class="panel">
@@ -259,6 +282,8 @@
 
   <script>
     const API_BASE = "/api/v1/observe/logs";
+    const ALERTS_API = "/api/v1/observe/alerts";
+    const ALERT_DETAIL_API = "/api/v1/observe/alerts/detail";
     const GRAFANA_BASE = "https://grafana.jianggan.cn";
     const HUBBLE_URL = "https://192.168.1.200:12000";
     const HUBBLE_PF = "kubectl -n kube-system port-forward --address 0.0.0.0 svc/hubble-ui 12000:80";
@@ -390,6 +415,73 @@
     });
     $("trace_id").addEventListener("input", refreshJumpLinks);
     refreshJumpLinks();
+
+    async function loadAlertDetail(params) {
+      const qs = new URLSearchParams(params);
+      const res = await fetch(ALERT_DETAIL_API + "?" + qs.toString());
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || ("HTTP " + res.status));
+      $("alertDetail").textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function loadAlerts() {
+      const st = $("alertStatus");
+      st.textContent = "查询中…";
+      st.classList.remove("err");
+      try {
+        const params = new URLSearchParams();
+        const sev = $("alertSeverity").value.trim();
+        const filter = $("alertFilter").value.trim();
+        if (sev) params.set("severity", sev);
+        if (filter) params.set("filter", filter);
+        const res = await fetch(ALERTS_API + "?" + params.toString());
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || data.error || ("HTTP " + res.status));
+        $("alertMeta").innerHTML = "count=<strong>" + (data.count ?? 0) + "</strong>";
+        const items = data.items || [];
+        if (!items.length) {
+          $("alerts").innerHTML = '<div class="empty">无 firing 告警</div>';
+        } else {
+          $("alerts").innerHTML = items.map((item) => {
+            const name = escapeHtml(item.alertname || "-");
+            const sev = escapeHtml(item.severity || "-");
+            const ns = escapeHtml(item.namespace || "-");
+            const pod = escapeHtml(item.pod || "-");
+            const fp = escapeHtml(item.fingerprint || "");
+            return (
+              '<div class="log-row">' +
+                '<div class="log-time">' + sev + "</div>" +
+                '<div class="log-body">' +
+                  '<a class="tag-link" href="#" data-fp="' + fp +
+                  '" data-an="' + name + '" data-ns="' + ns + '" data-pod="' + pod + '">' +
+                  name + "</a> ns=" + ns + " pod=" + pod +
+                  " · " + escapeHtml(item.summary || item.description || "") +
+                "</div>" +
+              "</div>"
+            );
+          }).join("");
+          $("alerts").querySelectorAll("a.tag-link").forEach((a) => {
+            a.addEventListener("click", (ev) => {
+              ev.preventDefault();
+              loadAlertDetail({
+                fingerprint: a.getAttribute("data-fp") || "",
+                alertname: a.getAttribute("data-an") || "",
+                namespace: a.getAttribute("data-ns") === "-" ? "" : (a.getAttribute("data-ns") || ""),
+                pod: a.getAttribute("data-pod") === "-" ? "" : (a.getAttribute("data-pod") || "")
+              }).catch((err) => {
+                $("alertDetail").textContent = String(err.message || err);
+              });
+            });
+          });
+        }
+        st.innerHTML = "<strong>OK</strong>";
+      } catch (err) {
+        $("alerts").innerHTML = '<div class="empty err">' + escapeHtml(err.message || String(err)) + "</div>";
+        st.textContent = "失败";
+        st.classList.add("err");
+      }
+    }
+    $("btnAlerts").addEventListener("click", loadAlerts);
 
     // Deep-link: /?namespace=&pod=&container=&trace_id=
     const sp = new URLSearchParams(location.search);

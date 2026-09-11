@@ -44,6 +44,8 @@ func main() {
 	mux.HandleFunc("/api/readyz", readyzHandler)
 	mux.HandleFunc("/api/v1/version", versionHandler)
 	mux.HandleFunc("/api/v1/observe/logs", logsHandler)
+	mux.HandleFunc("/api/v1/observe/alerts", alertsHandler)
+	mux.HandleFunc("/api/v1/observe/alerts/detail", alertDetailHandler)
 	mux.HandleFunc("/metrics", metricsHandler)
 	mux.HandleFunc("/", notFoundHandler)
 
@@ -57,7 +59,9 @@ func main() {
 		"addr":              addr,
 		"version":           version,
 		"commit":            commit,
-		"victoria_logs_url": env("VICTORIA_LOGS_URL", defaultVictoriaLogsURL()),
+		"victoria_logs_url":  env("VICTORIA_LOGS_URL", defaultVictoriaLogsURL()),
+		"alertmanager_url":   env("ALERTMANAGER_URL", defaultAlertmanagerURL()),
+		"prometheus_server":  env("PROMETHEUS_SERVER", defaultPrometheusURL()),
 	})
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logJSON("error", "service_stopped", map[string]any{"error": err.Error()})
