@@ -20,12 +20,12 @@ CloudOps AI 智能运维平台前端（静态页）。
 |------|------|
 | Grafana | `https://grafana.jianggan.cn` |
 | Tempo（Explore） | Grafana Explore，datasource uid=`tempo`；带当前 `trace_id` |
-| Hubble UI | `http://127.0.0.1:12000`（需本机 `kubectl port-forward`） |
+| Hubble UI | `https://192.168.1.200:12000`（harbor 上 `--address 0.0.0.0` port-forward） |
 
 日志结果中带 `trace_id` 的行可点 **→ Tempo**。
 
 Hubble port-forward：
 
 ```bash
-kubectl -n kube-system port-forward svc/hubble-ui 12000:80
+kubectl -n kube-system port-forward --address 0.0.0.0 svc/hubble-ui 12000:80
 ```

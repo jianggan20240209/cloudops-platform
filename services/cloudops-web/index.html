@@ -206,9 +206,9 @@
           <strong>Tempo（Explore）</strong>
           <span>用当前 trace_id 打开 Tempo；空则打开 Explore</span>
         </a>
-        <a class="jump-card" id="linkHubble" href="http://127.0.0.1:12000" target="_blank" rel="noopener">
+        <a class="jump-card" id="linkHubble" href="https://192.168.1.200:12000" target="_blank" rel="noopener">
           <strong>Hubble UI</strong>
-          <span>http://127.0.0.1:12000 · filter cloudops-dev</span>
+          <span>https://192.168.1.200:12000 · filter cloudops-dev</span>
         </a>
       </div>
       <div class="actions">
@@ -217,7 +217,7 @@
         <span id="jumpStatus" class="meta">就绪</span>
       </div>
       <p class="hint" style="margin:10px 0 0;">
-        Hubble：<code class="inline">kubectl -n kube-system port-forward svc/hubble-ui 12000:80</code>
+        Hubble：<code class="inline">kubectl -n kube-system port-forward --address 0.0.0.0 svc/hubble-ui 12000:80</code>
       </p>
     </section>
 
@@ -260,8 +260,8 @@
   <script>
     const API_BASE = "/api/v1/observe/logs";
     const GRAFANA_BASE = "https://grafana.jianggan.cn";
-    const HUBBLE_URL = "http://127.0.0.1:12000";
-    const HUBBLE_PF = "kubectl -n kube-system port-forward svc/hubble-ui 12000:80";
+    const HUBBLE_URL = "https://192.168.1.200:12000";
+    const HUBBLE_PF = "kubectl -n kube-system port-forward --address 0.0.0.0 svc/hubble-ui 12000:80";
 
     function $(id) { return document.getElementById(id); }
 
