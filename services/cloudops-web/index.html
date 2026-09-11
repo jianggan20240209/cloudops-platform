@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CloudOps · Pod 日志</title>
+  <title>CloudOps · 观测入口</title>
   <style>
     :root {
       --bg: #f4f6f8;
@@ -57,11 +57,36 @@
       margin: 0 0 14px;
       font-size: 16px;
     }
+    .panel .hint {
+      margin: 0 0 12px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 12px;
     }
+    .jump-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .jump-card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fafbfc;
+      text-decoration: none;
+      color: inherit;
+    }
+    .jump-card:hover { border-color: var(--accent); }
+    .jump-card strong { color: var(--accent); font-size: 15px; }
+    .jump-card span { font-size: 12px; color: var(--muted); line-height: 1.4; }
     label {
       display: flex;
       flex-direction: column;
@@ -139,20 +164,63 @@
       color: #79c0ff;
       font-size: 11px;
     }
+    a.tag-link {
+      color: #79c0ff;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
     .empty {
       padding: 28px;
       text-align: center;
       color: #8b949e;
     }
     a { color: var(--accent); }
+    code.inline {
+      font-family: var(--mono);
+      font-size: 12px;
+      background: #eef2f6;
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>CloudOps AI Platform</h1>
-    <p>Day 47 · Pod 详情日志查询（VictoriaLogs / <code>cloudops-observe</code>）</p>
+    <p>Day 55 · 观测入口（日志 → Tempo / Grafana / Hubble）</p>
   </header>
   <main>
+    <section class="panel">
+      <h2>观测跳转</h2>
+      <p class="hint">
+        链路：日志 <code class="inline">trace_id</code> → Grafana Explore（Tempo）看 Span；
+        网络层用 Hubble 看 forwarded / dropped（ADR-003）。
+        Hubble 默认本机 port-forward，需先执行下方命令。
+      </p>
+      <div class="jump-grid">
+        <a class="jump-card" id="linkGrafana" href="https://grafana.jianggan.cn" target="_blank" rel="noopener">
+          <strong>Grafana</strong>
+          <span>总入口 · grafana.jianggan.cn</span>
+        </a>
+        <a class="jump-card" id="linkTempo" href="#" target="_blank" rel="noopener">
+          <strong>Tempo（Explore）</strong>
+          <span>用当前 trace_id 打开 Tempo；空则打开 Explore</span>
+        </a>
+        <a class="jump-card" id="linkHubble" href="http://127.0.0.1:12000" target="_blank" rel="noopener">
+          <strong>Hubble UI</strong>
+          <span>http://127.0.0.1:12000 · filter cloudops-dev</span>
+        </a>
+      </div>
+      <div class="actions">
+        <button id="btnOpenTempo" class="secondary" type="button">打开 Tempo（当前 trace_id）</button>
+        <button id="btnCopyHubble" class="secondary" type="button">复制 Hubble port-forward</button>
+        <span id="jumpStatus" class="meta">就绪</span>
+      </div>
+      <p class="hint" style="margin:10px 0 0;">
+        Hubble：<code class="inline">kubectl -n kube-system port-forward svc/hubble-ui 12000:80</code>
+      </p>
+    </section>
+
     <section class="panel">
       <h2>查询条件</h2>
       <div class="grid">
@@ -191,8 +259,39 @@
 
   <script>
     const API_BASE = "/api/v1/observe/logs";
+    const GRAFANA_BASE = "https://grafana.jianggan.cn";
+    const HUBBLE_URL = "http://127.0.0.1:12000";
+    const HUBBLE_PF = "kubectl -n kube-system port-forward svc/hubble-ui 12000:80";
 
     function $(id) { return document.getElementById(id); }
+
+    function tempoExploreURL(traceId) {
+      const panes = {
+        d55: {
+          datasource: "tempo",
+          queries: [
+            {
+              refId: "A",
+              datasource: { type: "tempo", uid: "tempo" },
+              queryType: traceId ? "traceql" : "traceqlSearch",
+              limit: 20,
+              tableType: "traces",
+              query: traceId || '{resource.service.name=~".+"}'
+            }
+          ],
+          range: { from: "now-6h", to: "now" }
+        }
+      };
+      return GRAFANA_BASE + "/explore?orgId=1&schemaVersion=1&panes=" +
+        encodeURIComponent(JSON.stringify(panes));
+    }
+
+    function refreshJumpLinks() {
+      const tid = $("trace_id").value.trim();
+      $("linkTempo").href = tempoExploreURL(tid);
+      $("linkHubble").href = HUBBLE_URL;
+      $("linkGrafana").href = GRAFANA_BASE;
+    }
 
     function buildURL() {
       const params = new URLSearchParams();
@@ -220,7 +319,13 @@
         const tags = [];
         if (item.pod) tags.push('<span class="tag">' + escapeHtml(item.pod) + "</span>");
         if (item.container) tags.push('<span class="tag">' + escapeHtml(item.container) + "</span>");
-        if (item.trace_id) tags.push('<span class="tag">trace=' + escapeHtml(item.trace_id) + "</span>");
+        if (item.trace_id) {
+          const href = tempoExploreURL(String(item.trace_id));
+          tags.push(
+            '<a class="tag tag-link" href="' + escapeHtml(href) +
+            '" target="_blank" rel="noopener">trace=' + escapeHtml(item.trace_id) + " → Tempo</a>"
+          );
+        }
         if (item.app_msg) tags.push('<span class="tag">' + escapeHtml(String(item.app_msg)) + "</span>");
         const body = item.msg || JSON.stringify(item);
         return (
@@ -267,14 +372,31 @@
     $("btnTrace").addEventListener("click", () => {
       $("trace_id").value = "day46-trace-001";
       $("q").value = "";
+      refreshJumpLinks();
       runQuery();
     });
+    $("btnOpenTempo").addEventListener("click", () => {
+      refreshJumpLinks();
+      window.open(tempoExploreURL($("trace_id").value.trim()), "_blank", "noopener");
+    });
+    $("btnCopyHubble").addEventListener("click", async () => {
+      const st = $("jumpStatus");
+      try {
+        await navigator.clipboard.writeText(HUBBLE_PF);
+        st.innerHTML = "<strong>已复制 port-forward</strong>";
+      } catch (_) {
+        st.textContent = HUBBLE_PF;
+      }
+    });
+    $("trace_id").addEventListener("input", refreshJumpLinks);
+    refreshJumpLinks();
 
     // Deep-link: /?namespace=&pod=&container=&trace_id=
     const sp = new URLSearchParams(location.search);
     ["namespace", "pod", "container", "q", "trace_id", "limit"].forEach((k) => {
       if (sp.has(k)) $(k).value = sp.get(k);
     });
+    refreshJumpLinks();
     if (sp.get("auto") === "1") runQuery();
   </script>
 </body>
