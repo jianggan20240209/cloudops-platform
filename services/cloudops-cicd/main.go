@@ -22,6 +22,8 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const appName = "cloudops-cicd"
@@ -583,6 +585,18 @@ type prometheusQueryResponse struct {
 func main() {
 	addr := env("HTTP_ADDR", ":8080")
 	recordStore = newReleaseRecordStore()
+	ctx := context.Background()
+
+	shutdown, err := initTracer(ctx)
+	if err != nil {
+		logJSON("error", "otel_init_failed", map[string]any{"error": err.Error()})
+		shutdown = func(context.Context) error { return nil }
+	}
+	defer func() {
+		shCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(shCtx)
+	}()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthzHandler)
@@ -596,9 +610,11 @@ func main() {
 	mux.HandleFunc("/metrics", metricsHandler)
 	mux.HandleFunc("/", notFoundHandler)
 
+	handler := otelhttp.NewHandler(requestLogger(mux), appName)
+
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           requestLogger(mux),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -2554,12 +2570,17 @@ func resolveTraceIDs(r *http.Request) (traceID, requestID string) {
 		r.Header.Get("X-Request-Id"),
 		r.Header.Get("X-Request-ID"),
 	)
-	traceID = firstNonEmpty(
-		r.Header.Get("X-Trace-Id"),
-		r.Header.Get("X-Trace-ID"),
-		traceIDFromTraceparent(r.Header.Get("traceparent")),
-		requestID,
-	)
+	if span := trace.SpanFromContext(r.Context()); span.SpanContext().IsValid() {
+		traceID = span.SpanContext().TraceID().String()
+	}
+	if traceID == "" {
+		traceID = firstNonEmpty(
+			r.Header.Get("X-Trace-Id"),
+			r.Header.Get("X-Trace-ID"),
+			traceIDFromTraceparent(r.Header.Get("traceparent")),
+			requestID,
+		)
+	}
 	if requestID == "" {
 		requestID = newID()
 	}

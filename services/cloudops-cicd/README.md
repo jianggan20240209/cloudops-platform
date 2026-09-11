@@ -13,6 +13,7 @@
 当前版本会优先从 Argo CD API 读取实时 Application 状态，可从 Harbor API 查询镜像 tag 列表，并可从 Prometheus API 查询基础运行指标；如果没有配置对应依赖或调用失败，会回退到静态示例数据。后续再逐步接入 Jenkins API。
 
 访问日志为结构化 JSON（`trace_id` / `request_id`），与 gateway 约定一致（Day 45）；探针路径不打访问日志。
+少量 OTel SDK（Day 52）：`otelhttp` → Collector → Tempo，Resource 含 `service.version` / `deployment.id`。
 
 ## 本地目录
 
@@ -21,7 +22,9 @@ services/cloudops-cicd
 ├── Dockerfile
 ├── README.md
 ├── go.mod
-└── main.go
+├── go.sum
+├── main.go
+└── otel.go
 ```
 
 ## HTTP 接口
@@ -65,6 +68,11 @@ harbor-server.jianggan.cn/cloudops/cloudops-cicd:<tag>
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `HTTP_ADDR` | `:8080` | HTTP 监听地址 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | （空=关闭） | OTLP HTTP → Collector |
+| `OTEL_SERVICE_NAME` | `cloudops-cicd` | `service.name` |
+| `SERVICE_VERSION` | ldflags `version` | `service.version` |
+| `DEPLOYMENT_ENVIRONMENT` | `dev` | `deployment.environment` |
+| `DEPLOYMENT_ID` | `unknown` | `deployment.id`（集群内为 Pod UID） |
 | `ARGOCD_SERVER` | 空 | Argo CD API 地址，例如 `https://argocd.jianggan.cn` |
 | `ARGOCD_AUTH_TOKEN` | 空 | Argo CD API Token |
 | `ARGOCD_INSECURE` | `true` | 是否跳过 Argo CD HTTPS 证书校验 |

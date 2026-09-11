@@ -4,11 +4,15 @@ FROM ${GO_BUILD_IMAGE} AS builder
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
+ARG GOPROXY=https://goproxy.cn,direct
 
 WORKDIR /src
 
-COPY go.mod ./
-COPY main.go ./
+COPY go.mod go.sum ./
+ENV GOPROXY=${GOPROXY}
+RUN go mod download
+
+COPY main.go otel.go ./
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -trimpath \
