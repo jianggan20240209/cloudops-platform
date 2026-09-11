@@ -206,13 +206,13 @@
           <strong>Tempo（Explore）</strong>
           <span>用当前 trace_id 打开 Tempo；空则打开 Explore</span>
         </a>
-        <a class="jump-card" id="linkHubble" href="https://192.168.1.200:12000" target="_blank" rel="noopener">
+        <a class="jump-card" id="linkHubble" href="http://192.168.1.200:12000" target="_blank" rel="noopener">
           <strong>Hubble UI</strong>
-          <span>https://192.168.1.200:12000 · filter cloudops-dev</span>
+          <span>http://192.168.1.200:12000 · filter cloudops-dev</span>
         </a>
         <a class="jump-card" href="https://alertmanager.jianggan.cn" target="_blank" rel="noopener">
           <strong>Alertmanager</strong>
-          <span>alertmanager.jianggan.cn</span>
+          <span>https://alertmanager.jianggan.cn</span>
         </a>
       </div>
       <div class="actions">
@@ -285,7 +285,7 @@
     const ALERTS_API = "/api/v1/observe/alerts";
     const ALERT_DETAIL_API = "/api/v1/observe/alerts/detail";
     const GRAFANA_BASE = "https://grafana.jianggan.cn";
-    const HUBBLE_URL = "https://192.168.1.200:12000";
+    const HUBBLE_URL = "http://192.168.1.200:12000";
     const HUBBLE_PF = "kubectl -n kube-system port-forward --address 0.0.0.0 svc/hubble-ui 12000:80";
 
     function $(id) { return document.getElementById(id); }
