@@ -3,65 +3,177 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CloudOps · 观测入口</title>
+  <title>CloudOps AI Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #f4f6f8;
-      --panel: #ffffff;
-      --ink: #1f2328;
-      --muted: #57606a;
-      --line: #d0d7de;
-      --accent: #0969da;
-      --ok: #1a7f37;
-      --err: #cf222e;
-      --mono: "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
+      --bg: #0f1419;
+      --bg-elev: #161d27;
+      --sidebar: #0c1118;
+      --panel: #1a2330;
+      --ink: #e8eef6;
+      --muted: #8b9bb0;
+      --line: #2a3648;
+      --accent: #2dd4bf;
+      --accent-dim: rgba(45, 212, 191, 0.14);
+      --warn: #f0b429;
+      --ok: #3dd68c;
+      --err: #f07178;
+      --mono: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+      --sans: "IBM Plex Sans", "Microsoft YaHei", sans-serif;
+      --sidebar-w: 248px;
     }
     * { box-sizing: border-box; }
+    html, body { height: 100%; }
     body {
       margin: 0;
-      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      font-family: var(--sans);
       background:
-        radial-gradient(1200px 400px at 10% -10%, #dbeafe 0%, transparent 55%),
-        linear-gradient(180deg, #eef2f6 0%, var(--bg) 40%);
+        radial-gradient(900px 500px at 100% -10%, rgba(45, 212, 191, 0.08), transparent 55%),
+        radial-gradient(700px 400px at -10% 80%, rgba(56, 120, 180, 0.12), transparent 50%),
+        var(--bg);
       color: var(--ink);
+    }
+    .shell {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) 1fr;
       min-height: 100vh;
     }
-    header {
-      padding: 28px 24px 8px;
-      max-width: 1100px;
-      margin: 0 auto;
+    .sidebar {
+      background: linear-gradient(180deg, #0e1520 0%, var(--sidebar) 100%);
+      border-right: 1px solid var(--line);
+      padding: 20px 14px 28px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
     }
-    header h1 {
-      margin: 0 0 6px;
-      font-size: 28px;
+    .brand {
+      padding: 4px 10px 18px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 16px;
+    }
+    .brand-mark {
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent);
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.25;
+    }
+    .brand p {
+      margin: 6px 0 0;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .nav-group { margin-bottom: 14px; }
+    .nav-group-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #6b7c91;
+      padding: 8px 10px 6px;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+      padding: 9px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13.5px;
+      font-weight: 500;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-item:hover { background: rgba(255,255,255,0.04); color: var(--ink); }
+    .nav-item.active {
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+    .nav-item .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.55;
+      flex-shrink: 0;
+    }
+    .workspace {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 100vh;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 28px 12px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(15, 20, 25, 0.72);
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    .topbar h2 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
       letter-spacing: -0.02em;
     }
-    header p {
-      margin: 0;
+    .topbar .sub {
+      margin: 4px 0 0;
+      font-size: 13px;
       color: var(--muted);
-      font-size: 14px;
     }
-    main {
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 16px 24px 48px;
+    .content {
+      padding: 20px 28px 48px;
+      max-width: 1180px;
+      width: 100%;
+    }
+    .view { display: none; }
+    .view.active { display: block; animation: fadeIn 0.18s ease; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: none; }
     }
     .panel {
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: 12px;
       padding: 20px;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
     }
-    .panel h2 {
-      margin: 0 0 14px;
-      font-size: 16px;
+    .panel h3 {
+      margin: 0 0 12px;
+      font-size: 15px;
+      font-weight: 600;
     }
-    .panel .hint {
+    .hint {
       margin: 0 0 12px;
       font-size: 13px;
       color: var(--muted);
-      line-height: 1.5;
+      line-height: 1.55;
     }
     .grid {
       display: grid;
@@ -70,22 +182,26 @@
     }
     .jump-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       gap: 12px;
     }
     .jump-card {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
       padding: 14px;
       border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fafbfc;
+      border-radius: 10px;
+      background: var(--bg-elev);
       text-decoration: none;
       color: inherit;
+      transition: border-color 0.15s, transform 0.15s;
     }
-    .jump-card:hover { border-color: var(--accent); }
-    .jump-card strong { color: var(--accent); font-size: 15px; }
+    .jump-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+    .jump-card strong { color: var(--accent); font-size: 14px; }
     .jump-card span { font-size: 12px; color: var(--muted); line-height: 1.4; }
     label {
       display: flex;
@@ -94,15 +210,23 @@
       font-size: 12px;
       color: var(--muted);
     }
-    input, select, button {
-      font: inherit;
-    }
-    input, select {
-      padding: 9px 10px;
+    input, select, textarea, button { font: inherit; }
+    input, select, textarea {
+      padding: 9px 11px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fff;
+      background: #121820;
       color: var(--ink);
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: 1px solid var(--accent);
+      border-color: var(--accent);
+    }
+    textarea {
+      width: 100%;
+      font-family: var(--mono);
+      resize: vertical;
+      min-height: 100px;
     }
     .actions {
       display: flex;
@@ -116,267 +240,362 @@
       border-radius: 8px;
       padding: 9px 16px;
       background: var(--accent);
-      color: #fff;
+      color: #042f2e;
+      font-weight: 600;
       cursor: pointer;
     }
     button.secondary {
-      background: #eaeef2;
+      background: #243041;
       color: var(--ink);
+      font-weight: 500;
     }
-    button:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
     .meta {
-      font-size: 13px;
+      font-size: 12.5px;
       color: var(--muted);
       font-family: var(--mono);
     }
     .meta strong { color: var(--ok); }
     .err { color: var(--err); }
     .logs {
-      max-height: 62vh;
+      max-height: 58vh;
       overflow: auto;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #0d1117;
-      color: #e6edf3;
+      background: #0a0e14;
+      color: #d7e0ea;
       font-family: var(--mono);
       font-size: 12px;
       line-height: 1.45;
     }
     .log-row {
       display: grid;
-      grid-template-columns: 170px 1fr;
+      grid-template-columns: 150px 1fr;
       gap: 10px;
       padding: 8px 12px;
-      border-bottom: 1px solid #21262d;
+      border-bottom: 1px solid #1c2430;
     }
     .log-row:last-child { border-bottom: 0; }
-    .log-time { color: #8b949e; white-space: nowrap; }
+    .log-time { color: #7d8b9c; white-space: nowrap; }
     .log-body { word-break: break-word; white-space: pre-wrap; }
     .tag {
       display: inline-block;
       margin-right: 6px;
       padding: 1px 6px;
-      border-radius: 999px;
-      background: #21262d;
-      color: #79c0ff;
+      border-radius: 4px;
+      background: #1c2a38;
+      color: #7dd3fc;
       font-size: 11px;
     }
     a.tag-link {
-      color: #79c0ff;
+      color: #7dd3fc;
       text-decoration: underline;
       text-underline-offset: 2px;
     }
     .empty {
       padding: 28px;
       text-align: center;
-      color: #8b949e;
+      color: #7d8b9c;
     }
     a { color: var(--accent); }
     code.inline {
       font-family: var(--mono);
       font-size: 12px;
-      background: #eef2f6;
+      background: #121820;
       padding: 1px 5px;
       border-radius: 4px;
+      border: 1px solid var(--line);
+    }
+    .menu-toggle {
+      display: none;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--ink);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-weight: 500;
+    }
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        z-index: 20;
+        width: min(280px, 86vw);
+        transform: translateX(-105%);
+        transition: transform 0.2s ease;
+      }
+      .sidebar.open { transform: none; }
+      .menu-toggle { display: inline-flex; }
+      .content { padding: 16px; }
+      .log-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <header>
-    <h1>CloudOps AI Platform</h1>
-    <p>Day 71–154 · 构建 / GitOps / FinOps / AIOps</p>
-  </header>
-  <main>
-    <section class="panel">
-      <h2>观测跳转</h2>
-      <p class="hint">
-        链路：日志 <code class="inline">trace_id</code> → Grafana Explore（Tempo）看 Span；
-        网络层用 Hubble 看 forwarded / dropped（ADR-003）。
-        Hubble 默认本机 port-forward，需先执行下方命令。
-      </p>
-      <div class="jump-grid">
-        <a class="jump-card" id="linkGrafana" href="https://grafana.jianggan.cn" target="_blank" rel="noopener">
-          <strong>Grafana</strong>
-          <span>总入口 · grafana.jianggan.cn</span>
-        </a>
-        <a class="jump-card" id="linkTempo" href="#" target="_blank" rel="noopener">
-          <strong>Tempo（Explore）</strong>
-          <span>用当前 trace_id 打开 Tempo；空则打开 Explore</span>
-        </a>
-        <a class="jump-card" id="linkHubble" href="http://192.168.1.200:12000" target="_blank" rel="noopener">
-          <strong>Hubble UI</strong>
-          <span>http://192.168.1.200:12000 · filter cloudops-dev</span>
-        </a>
-        <a class="jump-card" href="https://alertmanager.jianggan.cn" target="_blank" rel="noopener">
-          <strong>Alertmanager</strong>
-          <span>https://alertmanager.jianggan.cn</span>
-        </a>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">CloudOps</div>
+        <h1>AI Platform</h1>
+        <p>智能运维控制台 · 查询优先 / 变更审批</p>
       </div>
-      <div class="actions">
-        <button id="btnOpenTempo" class="secondary" type="button">打开 Tempo（当前 trace_id）</button>
-        <button id="btnCopyHubble" class="secondary" type="button">复制 Hubble port-forward</button>
-        <span id="jumpStatus" class="meta">就绪</span>
-      </div>
-      <p class="hint" style="margin:10px 0 0;">
-        Hubble：<code class="inline">kubectl -n kube-system port-forward --address 0.0.0.0 svc/hubble-ui 12000:80</code>
-      </p>
-    </section>
 
-    <section class="panel">
-      <h2>告警列表（Day 59）</h2>
-      <div class="grid">
-        <label>severity
-          <input id="alertSeverity" placeholder="P0 / P1 / P2 / P3" />
-        </label>
-        <label>filter（Alertmanager）
-          <input id="alertFilter" placeholder='alertname="KubePodCrashLooping"' />
-        </label>
+      <div class="nav-group">
+        <div class="nav-group-title">可观测</div>
+        <button class="nav-item active" type="button" data-view="observe-jumps"><span class="dot"></span>观测入口</button>
+        <button class="nav-item" type="button" data-view="alerts"><span class="dot"></span>告警中心</button>
+        <button class="nav-item" type="button" data-view="logs"><span class="dot"></span>日志查询</button>
       </div>
-      <div class="actions">
-        <button id="btnAlerts" type="button">刷新告警</button>
-        <span id="alertStatus" class="meta">就绪</span>
-      </div>
-      <div id="alertMeta" class="meta" style="margin:10px 0;"></div>
-      <div id="alerts" class="logs"><div class="empty">点击刷新告警</div></div>
-      <pre id="alertDetail" class="logs" style="margin-top:12px;max-height:40vh;white-space:pre-wrap;padding:12px;"></pre>
-    </section>
 
-    <section class="panel">
-      <h2>资源浪费（Day 100 · FinOps）</h2>
-      <div class="grid">
-        <label>Namespace
-          <input id="resNs" value="cloudops-dev" />
-        </label>
+      <div class="nav-group">
+        <div class="nav-group-title">交付与发布</div>
+        <button class="nav-item" type="button" data-view="builds"><span class="dot"></span>批量构建</button>
+        <button class="nav-item" type="button" data-view="apps"><span class="dot"></span>Argo 应用</button>
+        <button class="nav-item" type="button" data-view="release-req"><span class="dot"></span>发布申请</button>
+        <button class="nav-item" type="button" data-view="release-diag"><span class="dot"></span>发布诊断</button>
       </div>
-      <div class="actions">
-        <button id="btnResources" type="button">刷新浪费列表</button>
-        <span id="resStatus" class="meta">就绪</span>
-      </div>
-      <div id="resOut" class="logs"><div class="empty">点击刷新</div></div>
-    </section>
 
-    <section class="panel">
-      <h2>AI 助手（Day 124 · RAG）</h2>
-      <label>问题
-        <input id="aiQ" value="CrashLoop 怎么排查？" style="width:100%" />
-      </label>
-      <div class="actions">
-        <button id="btnAsk" type="button">提问</button>
-        <button id="btnDiagAI" class="secondary" type="button">诊断草稿</button>
-        <button id="btnBackup" class="secondary" type="button">备份任务</button>
-        <span id="aiStatus" class="meta">就绪</span>
+      <div class="nav-group">
+        <div class="nav-group-title">成本与资源</div>
+        <button class="nav-item" type="button" data-view="resources"><span class="dot"></span>资源浪费</button>
       </div>
-      <pre id="aiOut" class="logs" style="margin-top:12px;max-height:40vh;white-space:pre-wrap;padding:12px;"></pre>
-    </section>
 
-    <section class="panel">
-      <h2>Argo CD 应用状态（Day 81）</h2>
-      <p class="hint">只读：调用 <code class="inline">/api/v1/cicd/apps</code>。</p>
-      <div class="actions">
-        <button id="btnApps" type="button">刷新应用</button>
-        <span id="appsStatus" class="meta">就绪</span>
+      <div class="nav-group">
+        <div class="nav-group-title">智能运维</div>
+        <button class="nav-item" type="button" data-view="aiops"><span class="dot"></span>AI 助手</button>
+        <button class="nav-item" type="button" data-view="backup"><span class="dot"></span>备份任务</button>
       </div>
-      <div id="appsMeta" class="meta" style="margin:10px 0;"></div>
-      <div id="apps" class="logs"><div class="empty">点击刷新</div></div>
-    </section>
+    </aside>
 
-    <section class="panel">
-      <h2>发布申请（Day 83）</h2>
-      <div class="grid">
-        <label>App
-          <input id="rrApp" value="cloudops-web" />
-        </label>
-        <label>Image tag
-          <input id="rrTag" value="main-1" />
-        </label>
-        <label>Requester
-          <input id="rrUser" value="lab" />
-        </label>
-        <label>Risk
-          <input id="rrRisk" value="low" />
-        </label>
+    <div class="workspace">
+      <div class="topbar">
+        <div>
+          <button class="menu-toggle" id="btnMenu" type="button">菜单</button>
+          <h2 id="pageTitle">观测入口</h2>
+          <p class="sub" id="pageSub">Grafana / Tempo / Hubble / Alertmanager 快捷跳转</p>
+        </div>
+        <span class="meta" id="clockMeta"></span>
       </div>
-      <label>变更说明
-        <input id="rrSummary" value="lab release request" />
-      </label>
-      <div class="actions">
-        <button id="btnRrCreate" type="button">提交申请</button>
-        <button id="btnRrList" class="secondary" type="button">刷新列表</button>
-        <span id="rrStatus" class="meta">就绪</span>
-      </div>
-      <div id="rrList" class="logs"><div class="empty">无申请</div></div>
-    </section>
 
-    <section class="panel">
-      <h2>发布失败诊断（Day 89）</h2>
-      <p class="hint">聚合 release / observability / Jenkins 字段（只读）。</p>
-      <div class="grid">
-        <label>App
-          <input id="diagApp" value="cloudops-gateway-rollout" />
-        </label>
-      </div>
-      <div class="actions">
-        <button id="btnDiag" type="button">诊断</button>
-        <span id="diagStatus" class="meta">就绪</span>
-      </div>
-      <pre id="diagOut" class="logs" style="margin-top:12px;max-height:40vh;white-space:pre-wrap;padding:12px;"></pre>
-    </section>
+      <main class="content">
+        <section class="view active" id="view-observe-jumps">
+          <div class="panel">
+            <h3>观测跳转</h3>
+            <p class="hint">
+              链路：日志 <code class="inline">trace_id</code> → Grafana Explore（Tempo）；
+              网络层用 Hubble 看 forwarded / dropped（ADR-003）。
+            </p>
+            <div class="jump-grid">
+              <a class="jump-card" id="linkGrafana" href="https://grafana.jianggan.cn" target="_blank" rel="noopener">
+                <strong>Grafana</strong>
+                <span>总入口 · grafana.jianggan.cn</span>
+              </a>
+              <a class="jump-card" id="linkTempo" href="#" target="_blank" rel="noopener">
+                <strong>Tempo（Explore）</strong>
+                <span>用当前 trace_id 打开；空则打开 Explore</span>
+              </a>
+              <a class="jump-card" id="linkHubble" href="http://192.168.1.200:12000" target="_blank" rel="noopener">
+                <strong>Hubble UI</strong>
+                <span>http://192.168.1.200:12000</span>
+              </a>
+              <a class="jump-card" href="https://alertmanager.jianggan.cn" target="_blank" rel="noopener">
+                <strong>Alertmanager</strong>
+                <span>https://alertmanager.jianggan.cn</span>
+              </a>
+            </div>
+            <div class="actions">
+              <button id="btnOpenTempo" class="secondary" type="button">打开 Tempo</button>
+              <button id="btnCopyHubble" class="secondary" type="button">复制 Hubble port-forward</button>
+              <span id="jumpStatus" class="meta">就绪</span>
+            </div>
+            <p class="hint" style="margin-top:12px;">
+              Hubble：<code class="inline">kubectl -n kube-system port-forward --address 0.0.0.0 svc/hubble-ui 12000:80</code>
+            </p>
+          </div>
+        </section>
 
-    <section class="panel">
-      <h2>批量构建（Day 74）</h2>
-      <p class="hint">每行：<code class="inline">服务名 分支</code>，例如 <code class="inline">cloudops-web main</code>。先 dry-run 匹配 job，再触发。</p>
-      <label>构建清单
-        <textarea id="buildList" rows="5" style="width:100%;font-family:ui-monospace,Consolas,monospace;padding:8px;border:1px solid #d0d7de;border-radius:6px;">cloudops-web main
+        <section class="view" id="view-alerts">
+          <div class="panel">
+            <h3>告警列表</h3>
+            <div class="grid">
+              <label>severity
+                <input id="alertSeverity" placeholder="P0 / P1 / P2 / P3" />
+              </label>
+              <label>filter（Alertmanager）
+                <input id="alertFilter" placeholder='alertname="KubePodCrashLooping"' />
+              </label>
+            </div>
+            <div class="actions">
+              <button id="btnAlerts" type="button">刷新告警</button>
+              <span id="alertStatus" class="meta">就绪</span>
+            </div>
+            <div id="alertMeta" class="meta" style="margin:10px 0;"></div>
+            <div id="alerts" class="logs"><div class="empty">点击刷新告警</div></div>
+            <pre id="alertDetail" class="logs" style="margin-top:12px;max-height:40vh;white-space:pre-wrap;padding:12px;"></pre>
+          </div>
+        </section>
+
+        <section class="view" id="view-logs">
+          <div class="panel">
+            <h3>查询条件</h3>
+            <div class="grid">
+              <label>Namespace
+                <input id="namespace" value="cloudops-dev" />
+              </label>
+              <label>Pod（支持 *）
+                <input id="pod" value="cloudops-gateway-*" placeholder="cloudops-gateway-*" />
+              </label>
+              <label>Container
+                <input id="container" value="cloudops-gateway" />
+              </label>
+              <label>关键词 / q
+                <input id="q" placeholder="http_request" />
+              </label>
+              <label>trace_id
+                <input id="trace_id" placeholder="day46-trace-001" />
+              </label>
+              <label>Limit
+                <input id="limit" type="number" min="1" max="200" value="30" />
+              </label>
+            </div>
+            <div class="actions">
+              <button id="btnQuery" type="button">查询日志</button>
+              <button id="btnTrace" class="secondary" type="button">按 day46-trace-001</button>
+              <span id="status" class="meta">就绪</span>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>日志结果</h3>
+            <div id="queryMeta" class="meta" style="margin-bottom:10px;"></div>
+            <div id="logs" class="logs"><div class="empty">填写条件后点击查询</div></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-builds">
+          <div class="panel">
+            <h3>批量构建</h3>
+            <p class="hint">每行：<code class="inline">服务名 分支</code>，例如 <code class="inline">cloudops-web main</code>。</p>
+            <label>构建清单
+              <textarea id="buildList">cloudops-web main
 cloudops-cicd main</textarea>
-      </label>
-      <div class="actions">
-        <button id="btnBuildDry" class="secondary" type="button">Dry-run 匹配</button>
-        <button id="btnBuildRun" type="button">触发构建</button>
-        <button id="btnBuildHist" class="secondary" type="button">刷新历史</button>
-        <span id="buildStatus" class="meta">就绪</span>
-      </div>
-      <div id="buildMeta" class="meta" style="margin:10px 0;"></div>
-      <div id="builds" class="logs"><div class="empty">先 dry-run 或触发构建</div></div>
-    </section>
+            </label>
+            <div class="actions">
+              <button id="btnBuildDry" class="secondary" type="button">Dry-run 匹配</button>
+              <button id="btnBuildRun" type="button">触发构建</button>
+              <button id="btnBuildHist" class="secondary" type="button">刷新历史</button>
+              <span id="buildStatus" class="meta">就绪</span>
+            </div>
+            <div id="buildMeta" class="meta" style="margin:10px 0;"></div>
+            <div id="builds" class="logs"><div class="empty">先 dry-run 或触发构建</div></div>
+          </div>
+        </section>
 
-    <section class="panel">
-      <h2>查询条件</h2>
-      <div class="grid">
-        <label>Namespace
-          <input id="namespace" value="cloudops-dev" />
-        </label>
-        <label>Pod（支持 *）
-          <input id="pod" value="cloudops-gateway-*" placeholder="cloudops-gateway-*" />
-        </label>
-        <label>Container
-          <input id="container" value="cloudops-gateway" />
-        </label>
-        <label>关键词 / q
-          <input id="q" placeholder="http_request" />
-        </label>
-        <label>trace_id
-          <input id="trace_id" placeholder="day46-trace-001" />
-        </label>
-        <label>Limit
-          <input id="limit" type="number" min="1" max="200" value="30" />
-        </label>
-      </div>
-      <div class="actions">
-        <button id="btnQuery" type="button">查询日志</button>
-        <button id="btnTrace" class="secondary" type="button">按 day46-trace-001</button>
-        <span id="status" class="meta">就绪</span>
-      </div>
-    </section>
+        <section class="view" id="view-apps">
+          <div class="panel">
+            <h3>Argo CD 应用状态</h3>
+            <p class="hint">只读：<code class="inline">/api/v1/cicd/apps</code></p>
+            <div class="actions">
+              <button id="btnApps" type="button">刷新应用</button>
+              <span id="appsStatus" class="meta">就绪</span>
+            </div>
+            <div id="appsMeta" class="meta" style="margin:10px 0;"></div>
+            <div id="apps" class="logs"><div class="empty">点击刷新</div></div>
+          </div>
+        </section>
 
-    <section class="panel">
-      <h2>日志结果</h2>
-      <div id="queryMeta" class="meta" style="margin-bottom:10px;"></div>
-      <div id="logs" class="logs"><div class="empty">填写条件后点击查询</div></div>
-    </section>
-  </main>
+        <section class="view" id="view-release-req">
+          <div class="panel">
+            <h3>发布申请</h3>
+            <div class="grid">
+              <label>App
+                <input id="rrApp" value="cloudops-web" />
+              </label>
+              <label>Image tag
+                <input id="rrTag" value="main-1" />
+              </label>
+              <label>Requester
+                <input id="rrUser" value="lab" />
+              </label>
+              <label>Risk
+                <input id="rrRisk" value="low" />
+              </label>
+            </div>
+            <label style="margin-top:12px;">变更说明
+              <input id="rrSummary" value="lab release request" />
+            </label>
+            <div class="actions">
+              <button id="btnRrCreate" type="button">提交申请</button>
+              <button id="btnRrList" class="secondary" type="button">刷新列表</button>
+              <span id="rrStatus" class="meta">就绪</span>
+            </div>
+            <div id="rrList" class="logs" style="margin-top:12px;"><div class="empty">无申请</div></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-release-diag">
+          <div class="panel">
+            <h3>发布失败诊断</h3>
+            <p class="hint">聚合 release / observability / Jenkins（只读）。</p>
+            <div class="grid">
+              <label>App
+                <input id="diagApp" value="cloudops-gateway-rollout" />
+              </label>
+            </div>
+            <div class="actions">
+              <button id="btnDiag" type="button">诊断</button>
+              <span id="diagStatus" class="meta">就绪</span>
+            </div>
+            <pre id="diagOut" class="logs" style="margin-top:12px;max-height:50vh;white-space:pre-wrap;padding:12px;"></pre>
+          </div>
+        </section>
+
+        <section class="view" id="view-resources">
+          <div class="panel">
+            <h3>资源浪费（FinOps）</h3>
+            <div class="grid">
+              <label>Namespace
+                <input id="resNs" value="cloudops-dev" />
+              </label>
+            </div>
+            <div class="actions">
+              <button id="btnResources" type="button">刷新浪费列表</button>
+              <span id="resStatus" class="meta">就绪</span>
+            </div>
+            <div id="resOut" class="logs" style="margin-top:12px;"><div class="empty">点击刷新</div></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-aiops">
+          <div class="panel">
+            <h3>AI 助手（本地 RAG）</h3>
+            <label>问题
+              <input id="aiQ" value="CrashLoop 怎么排查？" />
+            </label>
+            <div class="actions">
+              <button id="btnAsk" type="button">提问</button>
+              <button id="btnDiagAI" class="secondary" type="button">诊断草稿</button>
+              <span id="aiStatus" class="meta">就绪</span>
+            </div>
+            <pre id="aiOut" class="logs" style="margin-top:12px;max-height:50vh;white-space:pre-wrap;padding:12px;"></pre>
+          </div>
+        </section>
+
+        <section class="view" id="view-backup">
+          <div class="panel">
+            <h3>备份任务</h3>
+            <p class="hint">Longhorn / Velero 计划 / etcd SOP 摘要（fixture + 计划态）。</p>
+            <div class="actions">
+              <button id="btnBackup" type="button">刷新备份任务</button>
+              <span id="backupStatus" class="meta">就绪</span>
+            </div>
+            <pre id="backupOut" class="logs" style="margin-top:12px;max-height:50vh;white-space:pre-wrap;padding:12px;"></pre>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
 
   <script>
     const API_BASE = "/api/v1/observe/logs";
@@ -393,8 +612,45 @@ cloudops-cicd main</textarea>
     const HUBBLE_URL = "http://192.168.1.200:12000";
     const HUBBLE_PF = "kubectl -n kube-system port-forward --address 0.0.0.0 svc/hubble-ui 12000:80";
 
+    const VIEW_META = {
+      "observe-jumps": { title: "观测入口", sub: "Grafana / Tempo / Hubble / Alertmanager 快捷跳转" },
+      alerts: { title: "告警中心", sub: "Alertmanager firing 列表与详情聚合" },
+      logs: { title: "日志查询", sub: "VictoriaLogs · 支持 namespace / pod / trace_id" },
+      builds: { title: "批量构建", sub: "Jenkins job 匹配、触发与历史" },
+      apps: { title: "Argo 应用", sub: "Sync / Health / imageTag（只读）" },
+      "release-req": { title: "发布申请", sub: "关联镜像 tag 与审批字段" },
+      "release-diag": { title: "发布诊断", sub: "失败时串联指标、日志、构建地址" },
+      resources: { title: "资源浪费", sub: "requests vs usage · FinOps 启发式" },
+      aiops: { title: "AI 助手", sub: "本地 RAG 问答与诊断草稿" },
+      backup: { title: "备份任务", sub: "灾备任务清单（计划态 + fixture）" }
+    };
+
+    function $(id) { return document.getElementById(id); }
+
+    function showView(name) {
+      document.querySelectorAll(".view").forEach((el) => el.classList.toggle("active", el.id === "view-" + name));
+      document.querySelectorAll(".nav-item").forEach((el) => el.classList.toggle("active", el.dataset.view === name));
+      const meta = VIEW_META[name] || { title: name, sub: "" };
+      $("pageTitle").textContent = meta.title;
+      $("pageSub").textContent = meta.sub;
+      $("sidebar").classList.remove("open");
+      location.hash = name;
+    }
+
+    document.querySelectorAll(".nav-item").forEach((btn) => {
+      btn.addEventListener("click", () => showView(btn.dataset.view));
+    });
+    $("btnMenu").addEventListener("click", () => $("sidebar").classList.toggle("open"));
+
+    function tickClock() {
+      $("clockMeta").textContent = new Date().toLocaleString("zh-CN", { hour12: false });
+    }
+    tickClock();
+    setInterval(tickClock, 1000);
+
     async function loadResources() {
       $("resStatus").textContent = "加载中…";
+      $("resStatus").classList.remove("err");
       try {
         const ns = $("resNs").value.trim() || "cloudops-dev";
         const res = await fetch(RESOURCES_API + "?namespace=" + encodeURIComponent(ns));
@@ -402,9 +658,9 @@ cloudops-cicd main</textarea>
         if (!res.ok) throw new Error(data.message || data.error || ("HTTP " + res.status));
         const items = data.items || [];
         $("resOut").innerHTML = items.slice(0, 40).map((it) => {
-          return '<div class="log-row"><div class="log-body">' +
+          return '<div class="log-row"><div class="log-time">' + escapeHtml(it.resource || "-") +
+            '</div><div class="log-body">' +
             '<span class="tag">' + escapeHtml(it.pod || "-") + "</span>" +
-            '<span class="tag">' + escapeHtml(it.resource) + "</span>" +
             '<span class="tag">waste=' + escapeHtml(String(Math.round(it.waste_pct || 0))) + "%</span>" +
             "</div></div>";
         }).join("") || '<div class="empty">无明显浪费（或 metrics 未就绪）</div>';
@@ -417,6 +673,7 @@ cloudops-cicd main</textarea>
 
     async function askAI() {
       $("aiStatus").textContent = "检索中…";
+      $("aiStatus").classList.remove("err");
       try {
         const res = await fetch(AIOPS_ASK, {
           method: "POST",
@@ -446,14 +703,14 @@ cloudops-cicd main</textarea>
     }
 
     async function loadBackupJobs() {
-      $("aiStatus").textContent = "加载备份…";
+      $("backupStatus").textContent = "加载备份…";
       try {
         const res = await fetch(AIOPS_BACKUP);
         const data = await res.json();
-        $("aiOut").textContent = JSON.stringify(data, null, 2);
-        $("aiStatus").textContent = res.ok ? "OK" : "ERR";
+        $("backupOut").textContent = JSON.stringify(data, null, 2);
+        $("backupStatus").textContent = res.ok ? "OK" : "ERR";
       } catch (err) {
-        $("aiStatus").textContent = err.message || String(err);
+        $("backupStatus").textContent = err.message || String(err);
       }
     }
 
@@ -467,9 +724,9 @@ cloudops-cicd main</textarea>
         const list = Array.isArray(items) ? items : (items.items || []);
         $("appsMeta").textContent = "count=" + list.length + " source=" + (data.source || "-");
         $("apps").innerHTML = list.map((a) => {
-          return '<div class="log-row"><div class="log-body">' +
+          return '<div class="log-row"><div class="log-time">' + escapeHtml(a.sync || "-") +
+            '</div><div class="log-body">' +
             '<span class="tag">' + escapeHtml(a.name || "-") + "</span>" +
-            '<span class="tag">sync=' + escapeHtml(a.sync || "-") + "</span>" +
             '<span class="tag">health=' + escapeHtml(a.health || "-") + "</span>" +
             '<span class="tag">' + escapeHtml(a.current_tag || a.image || "") + "</span>" +
             (a.revision ? '<span class="tag">rev=' + escapeHtml(a.revision) + "</span>" : "") +
@@ -511,10 +768,10 @@ cloudops-cicd main</textarea>
         if (!res.ok) throw new Error(data.message || data.error || ("HTTP " + res.status));
         const items = data.items || [];
         $("rrList").innerHTML = items.map((r) => {
-          return '<div class="log-row"><div class="log-body">' +
+          return '<div class="log-row"><div class="log-time">' + escapeHtml(r.status || "-") +
+            '</div><div class="log-body">' +
             '<span class="tag">' + escapeHtml(r.app_name) + "</span>" +
             '<span class="tag">' + escapeHtml(r.image_tag) + "</span>" +
-            '<span class="tag">' + escapeHtml(r.status) + "</span>" +
             '<span class="tag">' + escapeHtml(r.risk_level || "") + "</span>" +
             (r.approver ? '<span class="tag">by=' + escapeHtml(r.approver) + "</span>" : "") +
             "</div></div>";
@@ -540,7 +797,7 @@ cloudops-cicd main</textarea>
         const buildURL = jenkinsJob && jenkinsBuild
           ? ("https://jenkins.jianggan.cn/job/" + jenkinsJob + "/" + jenkinsBuild + "/")
           : "";
-        const out = {
+        $("diagOut").textContent = JSON.stringify({
           app,
           release_ready: rel.ready,
           release_status: rel.status,
@@ -554,8 +811,7 @@ cloudops-cicd main</textarea>
             jenkins_build: buildURL,
             logs: "/api/v1/observe/logs?namespace=cloudops-dev&pod=" + encodeURIComponent(app) + "-*"
           }
-        };
-        $("diagOut").textContent = JSON.stringify(out, null, 2);
+        }, null, 2);
         $("diagStatus").textContent = "OK";
       } catch (err) {
         $("diagStatus").textContent = err.message || String(err);
@@ -577,7 +833,7 @@ cloudops-cicd main</textarea>
         return;
       }
       $("builds").innerHTML = items.map((item) => {
-        const m = item.job ? item : item;
+        const m = item;
         const job = (m.job && m.job.name) || m.jenkins_job || "-";
         const svc = m.service || "-";
         const branch = m.branch || "";
@@ -598,7 +854,8 @@ cloudops-cicd main</textarea>
           ? ' <a class="tag-link" href="' + escapeHtml(url) + '" target="_blank" rel="noopener">open</a>'
           : "";
         const fail = err ? '<div class="log-body err">' + escapeHtml(err) + "</div>" : "";
-        return '<div class="log-row"><div class="log-body">' + tags + link + "</div>" + fail + "</div>";
+        return '<div class="log-row"><div class="log-time">' + escapeHtml(status || "job") +
+          '</div><div class="log-body">' + tags + link + "</div>" + fail + "</div>";
       }).join("");
     }
 
@@ -655,21 +912,16 @@ cloudops-cicd main</textarea>
       }
     }
 
-    function $(id) { return document.getElementById(id); }
-
     function tempoExploreURL(traceId) {
-      // classic left= Explore state — panes= crashes some Grafana builds (fields undefined)
       const left = {
         datasource: "tempo",
-        queries: [
-          {
-            refId: "A",
-            datasource: { type: "tempo", uid: "tempo" },
-            queryType: traceId ? "traceql" : "traceqlSearch",
-            limit: 20,
-            query: traceId || ""
-          }
-        ],
+        queries: [{
+          refId: "A",
+          datasource: { type: "tempo", uid: "tempo" },
+          queryType: traceId ? "traceql" : "traceqlSearch",
+          limit: 20,
+          query: traceId || ""
+        }],
         range: { from: "now-6h", to: "now" }
       };
       return GRAFANA_BASE + "/explore?orgId=1&left=" + encodeURIComponent(JSON.stringify(left));
@@ -684,11 +936,10 @@ cloudops-cicd main</textarea>
 
     function buildURL() {
       const params = new URLSearchParams();
-      const fields = ["namespace", "pod", "container", "q", "trace_id", "limit"];
-      for (const key of fields) {
+      ["namespace", "pod", "container", "q", "trace_id", "limit"].forEach((key) => {
         const v = $(key).value.trim();
         if (v) params.set(key, v);
-      }
+      });
       return API_BASE + "?" + params.toString();
     }
 
@@ -698,12 +949,10 @@ cloudops-cicd main</textarea>
       $("queryMeta").innerHTML =
         "LogsQL: <strong>" + escapeHtml(payload.query || "") + "</strong> · count=" +
         (payload.count ?? 0) + " · limit=" + (payload.limit ?? "-");
-
       if (!items.length) {
         box.innerHTML = '<div class="empty">无匹配日志</div>';
         return;
       }
-
       box.innerHTML = items.map((item) => {
         const tags = [];
         if (item.pod) tags.push('<span class="tag">' + escapeHtml(item.pod) + "</span>");
@@ -743,9 +992,7 @@ cloudops-cicd main</textarea>
       try {
         const res = await fetch(buildURL());
         const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.message || data.error || ("HTTP " + res.status));
-        }
+        if (!res.ok) throw new Error(data.message || data.error || ("HTTP " + res.status));
         renderItems(data);
         status.innerHTML = "<strong>OK</strong>";
       } catch (err) {
@@ -756,40 +1003,6 @@ cloudops-cicd main</textarea>
         btn.disabled = false;
       }
     }
-
-    $("btnQuery").addEventListener("click", runQuery);
-    $("btnBuildDry").addEventListener("click", runBuildDry);
-    $("btnBuildRun").addEventListener("click", runBuildTrigger);
-    $("btnBuildHist").addEventListener("click", loadBuildHistory);
-    $("btnApps").addEventListener("click", loadApps);
-    $("btnRrCreate").addEventListener("click", createReleaseRequest);
-    $("btnRrList").addEventListener("click", listReleaseRequests);
-    $("btnDiag").addEventListener("click", runDiagnosis);
-    $("btnResources").addEventListener("click", loadResources);
-    $("btnAsk").addEventListener("click", askAI);
-    $("btnDiagAI").addEventListener("click", diagAI);
-    $("btnBackup").addEventListener("click", loadBackupJobs);
-    $("btnTrace").addEventListener("click", () => {
-      $("trace_id").value = "day46-trace-001";
-      $("q").value = "";
-      refreshJumpLinks();
-      runQuery();
-    });
-    $("btnOpenTempo").addEventListener("click", () => {
-      refreshJumpLinks();
-      window.open(tempoExploreURL($("trace_id").value.trim()), "_blank", "noopener");
-    });
-    $("btnCopyHubble").addEventListener("click", async () => {
-      const st = $("jumpStatus");
-      try {
-        await navigator.clipboard.writeText(HUBBLE_PF);
-        st.innerHTML = "<strong>已复制 port-forward</strong>";
-      } catch (_) {
-        st.textContent = HUBBLE_PF;
-      }
-    });
-    $("trace_id").addEventListener("input", refreshJumpLinks);
-    refreshJumpLinks();
 
     async function loadAlertDetail(params) {
       const qs = new URLSearchParams(params);
@@ -856,15 +1069,55 @@ cloudops-cicd main</textarea>
         st.classList.add("err");
       }
     }
-    $("btnAlerts").addEventListener("click", loadAlerts);
 
-    // Deep-link: /?namespace=&pod=&container=&trace_id=
+    $("btnQuery").addEventListener("click", runQuery);
+    $("btnBuildDry").addEventListener("click", runBuildDry);
+    $("btnBuildRun").addEventListener("click", runBuildTrigger);
+    $("btnBuildHist").addEventListener("click", loadBuildHistory);
+    $("btnApps").addEventListener("click", loadApps);
+    $("btnRrCreate").addEventListener("click", createReleaseRequest);
+    $("btnRrList").addEventListener("click", listReleaseRequests);
+    $("btnDiag").addEventListener("click", runDiagnosis);
+    $("btnResources").addEventListener("click", loadResources);
+    $("btnAsk").addEventListener("click", askAI);
+    $("btnDiagAI").addEventListener("click", diagAI);
+    $("btnBackup").addEventListener("click", loadBackupJobs);
+    $("btnAlerts").addEventListener("click", loadAlerts);
+    $("btnTrace").addEventListener("click", () => {
+      showView("logs");
+      $("trace_id").value = "day46-trace-001";
+      $("q").value = "";
+      refreshJumpLinks();
+      runQuery();
+    });
+    $("btnOpenTempo").addEventListener("click", () => {
+      refreshJumpLinks();
+      window.open(tempoExploreURL($("trace_id").value.trim()), "_blank", "noopener");
+    });
+    $("btnCopyHubble").addEventListener("click", async () => {
+      const st = $("jumpStatus");
+      try {
+        await navigator.clipboard.writeText(HUBBLE_PF);
+        st.innerHTML = "<strong>已复制 port-forward</strong>";
+      } catch (_) {
+        st.textContent = HUBBLE_PF;
+      }
+    });
+    $("trace_id").addEventListener("input", refreshJumpLinks);
+    refreshJumpLinks();
+
     const sp = new URLSearchParams(location.search);
     ["namespace", "pod", "container", "q", "trace_id", "limit"].forEach((k) => {
       if (sp.has(k)) $(k).value = sp.get(k);
     });
     refreshJumpLinks();
-    if (sp.get("auto") === "1") runQuery();
+
+    const initial = (location.hash || "").replace(/^#/, "") || "observe-jumps";
+    if (VIEW_META[initial]) showView(initial);
+    if (sp.get("auto") === "1") {
+      showView("logs");
+      runQuery();
+    }
   </script>
 </body>
 </html>
