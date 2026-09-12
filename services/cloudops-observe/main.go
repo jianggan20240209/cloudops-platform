@@ -46,6 +46,7 @@ func main() {
 	mux.HandleFunc("/api/v1/observe/logs", logsHandler)
 	mux.HandleFunc("/api/v1/observe/alerts", alertsHandler)
 	mux.HandleFunc("/api/v1/observe/alerts/detail", alertDetailHandler)
+	mux.HandleFunc("/api/v1/observe/resources", resourcesHandler)
 	mux.HandleFunc("/metrics", metricsHandler)
 	mux.HandleFunc("/", notFoundHandler)
 

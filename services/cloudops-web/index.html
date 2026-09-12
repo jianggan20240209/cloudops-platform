@@ -187,7 +187,7 @@
 <body>
   <header>
     <h1>CloudOps AI Platform</h1>
-    <p>Day 71–98 · 构建 / GitOps / 灰度 / 观测入口</p>
+    <p>Day 71–154 · 构建 / GitOps / FinOps / AIOps</p>
   </header>
   <main>
     <section class="panel">
@@ -242,6 +242,34 @@
       <div id="alertMeta" class="meta" style="margin:10px 0;"></div>
       <div id="alerts" class="logs"><div class="empty">点击刷新告警</div></div>
       <pre id="alertDetail" class="logs" style="margin-top:12px;max-height:40vh;white-space:pre-wrap;padding:12px;"></pre>
+    </section>
+
+    <section class="panel">
+      <h2>资源浪费（Day 100 · FinOps）</h2>
+      <div class="grid">
+        <label>Namespace
+          <input id="resNs" value="cloudops-dev" />
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnResources" type="button">刷新浪费列表</button>
+        <span id="resStatus" class="meta">就绪</span>
+      </div>
+      <div id="resOut" class="logs"><div class="empty">点击刷新</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>AI 助手（Day 124 · RAG）</h2>
+      <label>问题
+        <input id="aiQ" value="CrashLoop 怎么排查？" style="width:100%" />
+      </label>
+      <div class="actions">
+        <button id="btnAsk" type="button">提问</button>
+        <button id="btnDiagAI" class="secondary" type="button">诊断草稿</button>
+        <button id="btnBackup" class="secondary" type="button">备份任务</button>
+        <span id="aiStatus" class="meta">就绪</span>
+      </div>
+      <pre id="aiOut" class="logs" style="margin-top:12px;max-height:40vh;white-space:pre-wrap;padding:12px;"></pre>
     </section>
 
     <section class="panel">
@@ -357,9 +385,77 @@ cloudops-cicd main</textarea>
     const BUILDS_API = "/api/v1/cicd/builds";
     const APPS_API = "/api/v1/cicd/apps";
     const RR_API = "/api/v1/cicd/release-requests";
+    const RESOURCES_API = "/api/v1/observe/resources";
+    const AIOPS_ASK = "/api/v1/aiops/ask";
+    const AIOPS_DIAG = "/api/v1/aiops/diagnose";
+    const AIOPS_BACKUP = "/api/v1/aiops/backup/jobs";
     const GRAFANA_BASE = "https://grafana.jianggan.cn";
     const HUBBLE_URL = "http://192.168.1.200:12000";
     const HUBBLE_PF = "kubectl -n kube-system port-forward --address 0.0.0.0 svc/hubble-ui 12000:80";
+
+    async function loadResources() {
+      $("resStatus").textContent = "加载中…";
+      try {
+        const ns = $("resNs").value.trim() || "cloudops-dev";
+        const res = await fetch(RESOURCES_API + "?namespace=" + encodeURIComponent(ns));
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || data.error || ("HTTP " + res.status));
+        const items = data.items || [];
+        $("resOut").innerHTML = items.slice(0, 40).map((it) => {
+          return '<div class="log-row"><div class="log-body">' +
+            '<span class="tag">' + escapeHtml(it.pod || "-") + "</span>" +
+            '<span class="tag">' + escapeHtml(it.resource) + "</span>" +
+            '<span class="tag">waste=' + escapeHtml(String(Math.round(it.waste_pct || 0))) + "%</span>" +
+            "</div></div>";
+        }).join("") || '<div class="empty">无明显浪费（或 metrics 未就绪）</div>';
+        $("resStatus").textContent = "count=" + (data.count || 0);
+      } catch (err) {
+        $("resStatus").textContent = err.message || String(err);
+        $("resStatus").classList.add("err");
+      }
+    }
+
+    async function askAI() {
+      $("aiStatus").textContent = "检索中…";
+      try {
+        const res = await fetch(AIOPS_ASK, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: $("aiQ").value.trim() })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || data.error || ("HTTP " + res.status));
+        $("aiOut").textContent = (data.answer || "") + "\n\n" + JSON.stringify(data.citations || [], null, 2);
+        $("aiStatus").textContent = "OK";
+      } catch (err) {
+        $("aiStatus").textContent = err.message || String(err);
+        $("aiStatus").classList.add("err");
+      }
+    }
+
+    async function diagAI() {
+      $("aiStatus").textContent = "诊断中…";
+      try {
+        const res = await fetch(AIOPS_DIAG + "?alertname=KubePodCrashLooping&namespace=cloudops-dev", { method: "POST" });
+        const data = await res.json();
+        $("aiOut").textContent = JSON.stringify(data, null, 2);
+        $("aiStatus").textContent = res.ok ? "OK" : (data.message || "ERR");
+      } catch (err) {
+        $("aiStatus").textContent = err.message || String(err);
+      }
+    }
+
+    async function loadBackupJobs() {
+      $("aiStatus").textContent = "加载备份…";
+      try {
+        const res = await fetch(AIOPS_BACKUP);
+        const data = await res.json();
+        $("aiOut").textContent = JSON.stringify(data, null, 2);
+        $("aiStatus").textContent = res.ok ? "OK" : "ERR";
+      } catch (err) {
+        $("aiStatus").textContent = err.message || String(err);
+      }
+    }
 
     async function loadApps() {
       $("appsStatus").textContent = "加载中…";
@@ -669,6 +765,10 @@ cloudops-cicd main</textarea>
     $("btnRrCreate").addEventListener("click", createReleaseRequest);
     $("btnRrList").addEventListener("click", listReleaseRequests);
     $("btnDiag").addEventListener("click", runDiagnosis);
+    $("btnResources").addEventListener("click", loadResources);
+    $("btnAsk").addEventListener("click", askAI);
+    $("btnDiagAI").addEventListener("click", diagAI);
+    $("btnBackup").addEventListener("click", loadBackupJobs);
     $("btnTrace").addEventListener("click", () => {
       $("trace_id").value = "day46-trace-001";
       $("q").value = "";
